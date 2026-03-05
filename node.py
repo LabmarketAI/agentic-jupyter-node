@@ -33,6 +33,8 @@ except ImportError:
     SiblingClient = None  # type: ignore
     PubSubManager = None  # type: ignore
 
+import httpx
+from a2a.client.client_factory import ClientFactory, ClientConfig
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import AgentCard, AgentCapabilities, AgentSkill, Message
 from a2a.utils import new_agent_text_message
@@ -307,6 +309,40 @@ def _parse_command(text: str) -> dict | None:
     return None
 
 
+# ── LLM fallback via model-node ───────────────────────────────────────────────
+
+async def _llm_fallback(text: str, event_queue) -> bool:
+    """
+    Forward *text* to model-node via A2A when it can't be parsed as a command.
+    Returns True if the call succeeded, False if model-node is unavailable.
+    """
+    model_url = os.environ.get("SIBLING_MODEL_NODE_URL", "").rstrip("/")
+    if not model_url:
+        return False
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as probe:
+            r = await probe.get(f"{model_url}/.well-known/a2a")
+            if r.status_code != 200:
+                return False
+            card = AgentCard.model_validate(r.json())
+
+        async with httpx.AsyncClient(timeout=60.0) as http_client:
+            factory = ClientFactory(ClientConfig(httpx_client=http_client))
+            client = factory.create(card)
+            async for event in client.send_message(new_agent_text_message(text)):
+                if isinstance(event, tuple):
+                    _, update = event
+                    if update is not None:
+                        await event_queue.enqueue_event(update)
+                else:
+                    await event_queue.enqueue_event(event)
+        return True
+    except Exception as exc:
+        logger.warning("jupyter_executor.llm_fallback_failed", error=str(exc))
+        return False
+
+
 # ── Executor ─────────────────────────────────────────────────────────────────
 
 class JupyterExecutor(AgentExecutor):
@@ -319,6 +355,9 @@ class JupyterExecutor(AgentExecutor):
 
         cmd = _parse_command(text)
         if cmd is None:
+            # Try to answer via model-node LLM before falling back to the error.
+            if await _llm_fallback(text, event_queue):
+                return
             await event_queue.enqueue_event(
                 new_agent_text_message(
                     "Unrecognised command. Supported: "
