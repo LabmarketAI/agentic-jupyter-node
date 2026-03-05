@@ -499,7 +499,7 @@ class JupyterNode(BaseNode):
                 )
             body = await request.json()
             try:
-                client = SiblingClient(sibling_url_var, timeout=60.0)
+                client = SiblingClient(sibling_url_var, timeout=180.0)
                 result = await client.post("/generate", json=body)
                 return JSONResponse(result)
             except Exception as exc:
