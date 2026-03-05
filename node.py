@@ -467,6 +467,35 @@ class JupyterNode(BaseNode):
                 logger.error("infer.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
 
+        # ── POST /circuit/run — direct qiskit-node simulation (no A2A) ────────
+        @app.post("/circuit/run")
+        async def run_circuit_proxy(request: Request) -> JSONResponse:
+            """
+            Proxy a circuit execution request directly to qiskit-node.
+            Bypasses A2A. Optional 'pubsub_topic' in body will stream progress back to it.
+
+            Body: { "code": "...", "language": "openqasm3", "shots": 1024, "pubsub_topic": "..." }
+            """
+            if SiblingClient is None:
+                return JSONResponse(
+                    {"error": "SiblingClient not available (base image too old)"},
+                    status_code=503,
+                )
+            sibling_url_var = "SIBLING_QISKIT_NODE_URL"
+            if not os.environ.get(sibling_url_var):
+                return JSONResponse(
+                    {"error": f"{sibling_url_var} not set"},
+                    status_code=503,
+                )
+            body = await request.json()
+            try:
+                client = SiblingClient(sibling_url_var, timeout=120.0) # Longer timeout for simulations
+                result = await client.post("/circuit/run", json=body)
+                return JSONResponse(result)
+            except Exception as exc:
+                logger.error("circuit_run.error", error=str(exc))
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
     def register_mcp_tools(self, mcp) -> None:
         @mcp.tool()
         async def start_kernel(name: str) -> dict:
