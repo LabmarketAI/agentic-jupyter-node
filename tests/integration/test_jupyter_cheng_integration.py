@@ -346,3 +346,109 @@ def test_notebook_kernel_can_ask_cheng_agent():
         },
         timeout=TIMEOUT,
     )
+
+
+# ---------------------------------------------------------------------------
+# 7. /cheng/graph proxy — PPI neighbourhood graph (issue #31)
+# ---------------------------------------------------------------------------
+
+def test_cheng_graph_via_jupyter_proxy_returns_200():
+    """GET /cheng/graph returns 200."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+
+
+def test_cheng_graph_via_jupyter_proxy_is_json():
+    """Content-Type is application/json."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    assert "application/json" in resp.headers.get("content-type", ""), (
+        f"Expected application/json, got: {resp.headers.get('content-type')}"
+    )
+
+
+def test_cheng_graph_via_jupyter_proxy_shape():
+    """Response body has keys: drug_id, nodes, edges, node_count, edge_count."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    body = resp.json()
+    for key in ("drug_id", "nodes", "edges", "node_count", "edge_count"):
+        assert key in body, f"Missing key in response: {key}"
+
+
+def test_cheng_graph_nodes_have_correct_fields():
+    """Every node in nodes list has: id (int), label (str), is_target (bool)."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    nodes = resp.json()["nodes"]
+    for node in nodes:
+        assert isinstance(node.get("id"), int), f"node 'id' must be int, got: {node}"
+        assert isinstance(node.get("label"), str), f"node 'label' must be str, got: {node}"
+        assert isinstance(node.get("is_target"), bool), f"node 'is_target' must be bool, got: {node}"
+
+
+def test_cheng_graph_edges_have_correct_fields():
+    """Every edge in edges list has: source (int), target (int)."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    edges = resp.json()["edges"]
+    for edge in edges:
+        assert isinstance(edge.get("source"), int), f"edge 'source' must be int, got: {edge}"
+        assert isinstance(edge.get("target"), int), f"edge 'target' must be int, got: {edge}"
+
+
+def test_cheng_graph_aspirin_has_targets():
+    """For drug_id=DB00945 (aspirin), at least one node has is_target=True."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", params={"drug_id": "DB00945"}, timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    nodes = resp.json()["nodes"]
+    target_nodes = [n for n in nodes if n.get("is_target") is True]
+    assert len(target_nodes) > 0, "Expected at least one node with is_target=True for aspirin (DB00945)"
+
+
+def test_cheng_graph_limit_is_respected():
+    """GET /cheng/graph?limit=10 returns edge_count <= 10."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", params={"limit": 10}, timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    body = resp.json()
+    assert body["edge_count"] <= 10, (
+        f"Expected edge_count <= 10 with limit=10, got: {body['edge_count']}"
+    )
+
+
+def test_cheng_graph_node_count_matches_nodes_list():
+    """node_count field equals len(nodes)."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    body = resp.json()
+    assert body["node_count"] == len(body["nodes"]), (
+        f"node_count={body['node_count']} does not match len(nodes)={len(body['nodes'])}"
+    )
+
+
+def test_cheng_graph_edge_count_matches_edges_list():
+    """edge_count field equals len(edges)."""
+    if not _cheng_reachable():
+        pytest.skip("Cheng node not reachable")
+    resp = httpx.get(f"{JUPYTER_URL}/cheng/graph", timeout=TIMEOUT)
+    assert resp.status_code == 200, f"Unexpected status: {resp.status_code} — {resp.text}"
+    body = resp.json()
+    assert body["edge_count"] == len(body["edges"]), (
+        f"edge_count={body['edge_count']} does not match len(edges)={len(body['edges'])}"
+    )
