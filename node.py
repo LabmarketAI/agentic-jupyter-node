@@ -603,7 +603,7 @@ class JupyterNode(BaseNode):
                 },
             }
             try:
-                async with httpx.AsyncClient(timeout=120.0) as client:
+                async with httpx.AsyncClient(timeout=300.0) as client:
                     r = await client.post(f"{cheng_url}/rpc", json=rpc_payload)
                     data = r.json()
                 # Extract the first text part from the A2A response
