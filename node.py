@@ -459,6 +459,7 @@ class JupyterNode(BaseNode):
                 "--no-browser",
                 f"--IdentityProvider.token={token}",
                 "--ServerApp.allow_origin=*",
+                "--ServerApp.iopub_data_rate_limit=0",
             ]
             proc = await asyncio.create_subprocess_exec(*cmd)
             logger.info("jupyterlab.started", port=lab_port)
@@ -533,6 +534,92 @@ class JupyterNode(BaseNode):
                 return JSONResponse(result)
             except Exception as exc:
                 logger.error("circuit_run.error", error=str(exc))
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
+        # ── GET /cheng/summary — dataset overview via cheng-node HTTP API ──────
+        @app.get("/cheng/summary")
+        async def cheng_summary_proxy() -> JSONResponse:
+            """
+            Proxy /data/summary from cheng-dataset-node.
+            Returns paper reference and row counts for all four tables.
+            """
+            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            if not cheng_url:
+                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    r = await client.get(f"{cheng_url}/data/summary")
+                    return JSONResponse(r.json(), status_code=r.status_code)
+            except Exception as exc:
+                logger.error("cheng_summary.error", error=str(exc))
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
+        # ── POST /cheng/query — read-only SQL against cheng-node ──────────────
+        @app.post("/cheng/query")
+        async def cheng_query_proxy(request: Request) -> JSONResponse:
+            """
+            Proxy a read-only SQL query to cheng-dataset-node /data/query.
+            Body: { "sql": "SELECT ..." }
+            """
+            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            if not cheng_url:
+                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+            body = await request.json()
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    r = await client.post(f"{cheng_url}/data/query", json=body)
+                    return JSONResponse(r.json(), status_code=r.status_code)
+            except Exception as exc:
+                logger.error("cheng_query.error", error=str(exc))
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
+        # ── POST /cheng/ask — natural-language Q&A via cheng-node A2A ─────────
+        @app.post("/cheng/ask")
+        async def cheng_ask_proxy(request: Request) -> JSONResponse:
+            """
+            Forward a natural-language question to cheng-dataset-node via A2A.
+            Body: { "question": "How many drug targets are there?" }
+            Returns: { "answer": "..." }
+            """
+            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            if not cheng_url:
+                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+            body = await request.json()
+            question = body.get("question", "")
+            if not question:
+                return JSONResponse({"error": "Missing 'question' field"}, status_code=400)
+            rpc_payload = {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "message/send",
+                "params": {
+                    "message": {
+                        "role": "user",
+                        "parts": [{"kind": "text", "text": question}],
+                        "messageId": "jupyter-cheng-ask-1",
+                        "kind": "message",
+                    },
+                    "metadata": {},
+                },
+            }
+            try:
+                async with httpx.AsyncClient(timeout=120.0) as client:
+                    r = await client.post(f"{cheng_url}/rpc", json=rpc_payload)
+                    data = r.json()
+                # Extract the first text part from the A2A response
+                result = data.get("result", {})
+                parts = (
+                    result.get("parts")
+                    or (result.get("status", {}) or {}).get("message", {}).get("parts", [])
+                )
+                answer = " ".join(
+                    (p.get("text") or p.get("content", ""))
+                    for p in parts
+                    if isinstance(p, dict)
+                ).strip() or json.dumps(result)
+                return JSONResponse({"answer": answer})
+            except Exception as exc:
+                logger.error("cheng_ask.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
 
     def register_mcp_tools(self, mcp) -> None:

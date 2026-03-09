@@ -12,6 +12,7 @@ jupyter lab \
     --ServerApp.password="" \
     --ServerApp.allow_origin="*" \
     --ServerApp.root_dir=/app \
+    --ServerApp.iopub_data_rate_limit=0 \
     &
 
 # Start the FastAPI node

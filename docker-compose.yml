@@ -1,0 +1,29 @@
+services:
+  jupyter-node:
+    build: .
+    ports:
+      - "${JUPYTER_NODE_PORT:-8002}:${JUPYTER_NODE_PORT:-8002}"
+      - "${JUPYTER_LAB_PORT:-8888}:${JUPYTER_LAB_PORT:-8888}"
+    environment:
+      - NODE_NAME=jupyter-node
+      - NODE_TYPE=jupyter
+      - NODE_PORT=${JUPYTER_NODE_PORT:-8002}
+      - JUPYTER_LAB_PORT=${JUPYTER_LAB_PORT:-8888}
+      - SIBLING_MODEL_NODE_URL=${SIBLING_MODEL_NODE_URL:-http://model-node:8001}
+      - SIBLING_QISKIT_NODE_URL=${SIBLING_QISKIT_NODE_URL:-http://qiskit-node:8003}
+      - SIBLING_CHENG_NODE_URL=${SIBLING_CHENG_NODE_URL:-http://cheng-dataset-node:8004}
+      - CHENG_POSTGRES_DSN=${CHENG_POSTGRES_DSN:-postgresql://cheng:cheng@cheng-postgres:5432/cheng}
+      - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${JUPYTER_NODE_PORT:-8002}/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - agentnet
+
+networks:
+  agentnet:
+    name: agentnet
+    external: true
