@@ -622,6 +622,28 @@ class JupyterNode(BaseNode):
                 logger.error("cheng_ask.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
 
+        # ── GET /cheng/graph — PPI neighbourhood graph for a drug ────────────
+        @app.get("/cheng/graph")
+        async def cheng_graph_proxy(drug_id: str = "DB00945", limit: int = 300) -> JSONResponse:
+            """
+            Proxy GET /data/graph from cheng-dataset-node.
+            Returns {drug_id, nodes, edges, node_count, edge_count}.
+            Nodes carry an is_target flag; layout is done client-side.
+            """
+            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            if not cheng_url:
+                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+            try:
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    r = await client.get(
+                        f"{cheng_url}/data/graph",
+                        params={"drug_id": drug_id, "limit": limit},
+                    )
+                    return JSONResponse(r.json(), status_code=r.status_code)
+            except Exception as exc:
+                logger.error("cheng_graph.error", error=str(exc))
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
     def register_mcp_tools(self, mcp) -> None:
         @mcp.tool()
         async def start_kernel(name: str) -> dict:
