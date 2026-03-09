@@ -1,6 +1,7 @@
 jupyter_client>=8.0.0
 ipykernel>=6.0.0
 jupyterlab>=4.0.0
+nbconvert[webpdf]>=7.0.0
 numpy>=1.26.0
 pandas>=2.0.0
 networkx>=3.6.0

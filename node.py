@@ -457,6 +457,7 @@ class JupyterNode(BaseNode):
                 "--ip=0.0.0.0",
                 f"--port={lab_port}",
                 "--no-browser",
+                "--allow-root",
                 f"--IdentityProvider.token={token}",
                 "--ServerApp.allow_origin=*",
                 "--ServerApp.iopub_data_rate_limit=0",
