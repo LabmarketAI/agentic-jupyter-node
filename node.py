@@ -504,6 +504,13 @@ class JupyterNode(BaseNode):
                 client = SiblingClient(sibling_url_var, timeout=180.0)
                 result = await client.post("/generate", json=body)
                 return JSONResponse(result)
+            except httpx.HTTPStatusError as exc:
+                try:
+                    detail = exc.response.json()
+                except Exception:
+                    detail = {"error": exc.response.text}
+                logger.error("infer.error", error=str(exc), detail=detail)
+                return JSONResponse(detail, status_code=exc.response.status_code)
             except Exception as exc:
                 logger.error("infer.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
@@ -533,6 +540,14 @@ class JupyterNode(BaseNode):
                 client = SiblingClient(sibling_url_var, timeout=120.0) # Longer timeout for simulations
                 result = await client.post("/circuit/run", json=body)
                 return JSONResponse(result)
+            except httpx.HTTPStatusError as exc:
+                # Forward the upstream error body and status so the caller sees the real error
+                try:
+                    detail = exc.response.json()
+                except Exception:
+                    detail = {"error": exc.response.text}
+                logger.error("circuit_run.error", error=str(exc), detail=detail)
+                return JSONResponse(detail, status_code=exc.response.status_code)
             except Exception as exc:
                 logger.error("circuit_run.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
