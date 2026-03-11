@@ -3,6 +3,20 @@ set -e
 
 export PATH="${PATH}:/home/appuser/.local/bin"
 
+# Ensure the workspace directory exists and seed demo notebooks on first run.
+# The workspace is bind-mounted from the host (./workspace) so notebooks
+# survive container restarts and are never committed to git.
+WORKSPACE="${JUPYTER_ROOT_DIR:-/workspace}"
+mkdir -p "$WORKSPACE"
+if [ -d /app/notebooks ]; then
+    for nb in /app/notebooks/*.ipynb; do
+        [ -f "$nb" ] || continue
+        dest="$WORKSPACE/$(basename "$nb")"
+        # Only copy if the file does not already exist so user edits are preserved
+        [ -f "$dest" ] || cp "$nb" "$dest"
+    done
+fi
+
 # Start JupyterLab in background (no auth, bound to all interfaces)
 jupyter lab \
     --ip=0.0.0.0 \
@@ -11,7 +25,7 @@ jupyter lab \
     --ServerApp.token="" \
     --ServerApp.password="" \
     --ServerApp.allow_origin="*" \
-    --ServerApp.root_dir=/app \
+    --ServerApp.root_dir="${JUPYTER_ROOT_DIR:-/workspace}" \
     --ServerApp.iopub_data_rate_limit=0 \
     &
 

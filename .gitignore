@@ -7,3 +7,9 @@ __pycache__/
 *.egg-info/
 dist/
 build/
+
+# User notebooks — persisted locally via the ./workspace volume mount.
+# Never commit user work; demo notebooks live in notebooks/ and are tracked.
+workspace/
+.local/
+.jupyter/

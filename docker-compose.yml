@@ -14,6 +14,11 @@ services:
       - SIBLING_CHENG_NODE_URL=${SIBLING_CHENG_NODE_URL:-http://cheng-dataset-node:8004}
       - CHENG_POSTGRES_DSN=${CHENG_POSTGRES_DSN:-postgresql://cheng:cheng@cheng-postgres:5432/cheng}
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-}
+    volumes:
+      # Notebooks and user work persist on the host at ./workspace and are
+      # never committed to git (see .gitignore). The directory is created
+      # automatically on first `docker compose up`.
+      - ./workspace:/workspace
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:$${JUPYTER_NODE_PORT:-8002}/health || exit 1"]
       interval: 30s
