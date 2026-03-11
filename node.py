@@ -40,8 +40,51 @@ from a2a.types import AgentCard, AgentCapabilities, AgentSkill, Message
 from a2a.utils import new_agent_text_message
 from fastapi import Request
 from fastapi.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
 
 logger = structlog.get_logger()
+
+# ── Bearer token auth middleware ──────────────────────────────────────────────
+
+# Paths that don't require authentication even when A2A_AUTH_TOKEN is set.
+_AUTH_EXEMPT = frozenset(["/health", "/ready"])
+_AUTH_EXEMPT_PREFIXES = ("/.well-known/",)
+
+
+class BearerTokenMiddleware(BaseHTTPMiddleware):
+    """Require 'Authorization: Bearer <token>' on all non-exempt paths.
+
+    Only active when A2A_AUTH_TOKEN environment variable is set.
+    Allows unauthenticated access to /health, /ready, and /.well-known/* so
+    container orchestrators and service discovery always work.
+    """
+
+    def __init__(self, app, token: str) -> None:
+        super().__init__(app)
+        self._token = token
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        path = request.url.path
+        if path in _AUTH_EXEMPT or any(path.startswith(p) for p in _AUTH_EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            return Response(
+                content='{"detail":"Missing Bearer token"}',
+                status_code=401,
+                media_type="application/json",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        provided = auth_header[len("Bearer "):]
+        if provided != self._token:
+            return Response(
+                content='{"detail":"Invalid Bearer token"}',
+                status_code=403,
+                media_type="application/json",
+            )
+        return await call_next(request)
 
 # ── IOPub topic tag parsing ───────────────────────────────────────────────────
 
@@ -447,6 +490,19 @@ class JupyterNode(BaseNode):
     def register_routes(self, app) -> None:
         lab_port = int(os.environ.get("JUPYTER_LAB_PORT", "8888"))
         token = os.environ.get("JUPYTERLAB_TOKEN", "")
+
+        # Install bearer token middleware if A2A_AUTH_TOKEN is configured.
+        # In production (NODE_ENV=production) this must be set.
+        auth_token = os.environ.get("A2A_AUTH_TOKEN", "")
+        node_env = os.environ.get("NODE_ENV", "development")
+        if auth_token:
+            app.add_middleware(BearerTokenMiddleware, token=auth_token)
+            logger.info("jupyter_node.bearer_auth_enabled")
+        elif node_env == "production":
+            logger.warning(
+                "SECURITY: A2A_AUTH_TOKEN is not set in production — "
+                "jupyter-node API is unauthenticated. Set A2A_AUTH_TOKEN."
+            )
 
         _original_lifespan = app.router.lifespan_context
 
