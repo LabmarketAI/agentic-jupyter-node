@@ -1,8 +1,8 @@
 # agentic-jupyter-node
 
-Jupyter node for the [Labmarket agentic ecosystem](https://github.com/LabmarketAI/agentic-orchestrator). Provides an interactive JupyterLab environment alongside a FastAPI node that integrates with the orchestrator via the [Google A2A protocol](https://github.com/google-a2a/a2a-python). Supports live cell output streaming, direct access to sibling nodes (model-node, qiskit-node, cheng-dataset-node), and LLM-assisted code generation.
+Jupyter node for the Labmarket agentic ecosystem. Provides an interactive JupyterLab environment alongside a FastAPI node that integrates with the orchestrator via the [Google A2A protocol](https://github.com/google-a2a/a2a-python). Supports live cell output streaming, direct access to sibling nodes (model-node, qiskit-node, cheng-dataset-node), and LLM-assisted code generation.
 
-> **Questions or issues?** Start at the [agentic-orchestrator](https://github.com/LabmarketAI/agentic-orchestrator) — that is the main application and the entry point for the full stack.
+> **Questions or issues?** Visit the orchestrator at <!-- ORCHESTRATOR_URL -->http://localhost:8000<!-- /ORCHESTRATOR_URL --> — the main application and entry point for the full stack. Set `ORCHESTRATOR_URL` in `.env` to point here when deployed.
 
 ---
 
@@ -200,8 +200,7 @@ Your notebooks and any files in `/workspace` are untouched.
 
 ## Further Reading
 
-- [agentic-orchestrator](https://github.com/LabmarketAI/agentic-orchestrator) — main application, full stack setup, and issue tracker
-- [agentic-node-base](https://github.com/LabmarketAI/agentic-node-base) — base class shared by all nodes
-- [agentic-qiskit-node](https://github.com/LabmarketAI/agentic-qiskit-node) — quantum circuit execution
-- [agentic-dataset-cheng](https://github.com/LabmarketAI/agentic-dataset-cheng) — protein interaction dataset node
+- Orchestrator app: <!-- ORCHESTRATOR_URL -->http://localhost:8000<!-- /ORCHESTRATOR_URL --> — main application, UI, and API docs
+- Orchestrator API docs: <!-- ORCHESTRATOR_URL -->http://localhost:8000<!-- /ORCHESTRATOR_URL -->/docs
 - [Google A2A protocol](https://github.com/google-a2a/a2a-python) — agent-to-agent communication spec
+- [agentic-node-base](https://github.com/LabmarketAI/agentic-node-base) — base class shared by all nodes
