@@ -1,29 +1,39 @@
-name: Build and Publish Docker Image
+name: Build, Publish and Deploy
+
+# push v*.*.*  → publish to GHCR + deploy to ACA prod
+# push main    → build validate only
+# pull_request → build validate only
+# workflow_dispatch → manual publish + optional ACA deploy
 
 on:
   push:
-    tags:
-      - 'v*.*.*'
-    branches:
-      - main
+    tags: ['v*.*.*']
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to ACA prod after build'
+        required: false
+        type: boolean
+        default: false
 
 env:
   GHCR_IMAGE: ghcr.io/labmarketai/agentic-jupyter-node
+  PACKAGE_NAME: agentic-jupyter-node
+  ACA_APP_NAME: ca-jupyter-node-agentic-prod
+  ACA_RESOURCE_GROUP: rg-agentic-prod
 
 jobs:
+
   build:
     name: Build (validate)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
       - name: Build image (no push)
         uses: docker/build-push-action@v6
         with:
@@ -37,40 +47,34 @@ jobs:
     name: Publish to GHCR
     runs-on: ubuntu-latest
     needs: build
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
     permissions:
       contents: read
       packages: write
 
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU (for multi-platform builds)
+      - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
-
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Extract metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: |
-            ${{ env.GHCR_IMAGE }}
+          images: ${{ env.GHCR_IMAGE }}
           tags: |
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
             type=semver,pattern={{major}}
             type=sha,prefix=sha-,format=short
             type=raw,value=latest
-
       - name: Build and push (multi-platform)
         uses: docker/build-push-action@v6
         with:
@@ -92,10 +96,54 @@ jobs:
       - name: Set package visibility to public
         continue-on-error: true
         run: |
-          gh api \
-            --method PATCH \
+          gh api --method PATCH \
             -H "Accept: application/vnd.github+json" \
-            /orgs/LabmarketAI/packages/container/agentic-jupyter-node \
+            /orgs/LabmarketAI/packages/container/${{ env.PACKAGE_NAME }} \
             -f visibility=public
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-aca:
+    name: Deploy to ACA prod
+    runs-on: ubuntu-latest
+    needs: publish
+    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.deploy)
+    environment: prod
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve deploy image
+        id: image
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "tag=${{ env.GHCR_IMAGE }}:${VERSION}" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${{ env.GHCR_IMAGE }}:latest" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update ACA revision
+        run: |
+          az containerapp update \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --image "${{ steps.image.outputs.tag }}" \
+            --output none
+          echo "Deployed ${{ steps.image.outputs.tag }} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Verify health
+        run: |
+          sleep 60
+          FQDN=$(az containerapp show \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          HTTP=$(curl -s -o /dev/null -w "%{http_code}" "https://${FQDN}/health")
+          if [[ "$HTTP" != "200" ]]; then echo "Health check failed (HTTP $HTTP)" >&2; exit 1; fi
+          echo "Health OK ($HTTP) — https://${FQDN}" >> $GITHUB_STEP_SUMMARY
