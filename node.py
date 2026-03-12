@@ -36,7 +36,7 @@ except ImportError:
 import httpx
 from a2a.client.client_factory import ClientFactory, ClientConfig
 from a2a.server.agent_execution import AgentExecutor
-from a2a.types import AgentCard, AgentCapabilities, AgentSkill, Message
+from a2a.types import AgentCard, AgentCapabilities, AgentExtension, AgentSkill, Message
 from a2a.utils import new_agent_text_message
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -443,6 +443,7 @@ class JupyterNode(BaseNode):
     def get_agent_card(self) -> AgentCard:
         node_name = os.environ.get("NODE_NAME", "jupyter-node")
         node_port = os.environ.get("NODE_PORT", "8002")
+        lab_port = os.environ.get("JUPYTER_LAB_PORT", "8888")
         return AgentCard(
             name=node_name,
             description=(
@@ -484,7 +485,15 @@ class JupyterNode(BaseNode):
             ],
             default_input_modes=["MESSAGES"],
             default_output_modes=["MESSAGES"],
-            capabilities=AgentCapabilities(),
+            capabilities=AgentCapabilities(
+                extensions=[
+                    AgentExtension(
+                        uri="jupyter-lab",
+                        description="JupyterLab web UI",
+                        params={"url": f"http://{node_name}:{lab_port}/lab"},
+                    )
+                ]
+            ),
         )
 
     def register_routes(self, app) -> None:
