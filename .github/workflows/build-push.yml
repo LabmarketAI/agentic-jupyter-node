@@ -1,0 +1,119 @@
+name: Build, Push to ACR and Deploy
+
+# push main            → build + push :sha-<sha> + :latest to ACR
+# push v*.*.*          → build + push :v<version> + :sha-<sha> + deploy to ACA prod
+# repository_dispatch  → rebuild when agentic-node-base image is updated
+# workflow_dispatch    → manual build+push + optional deploy
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  pull_request:
+    branches: [main]
+  repository_dispatch:
+    types: [node-base-updated]
+  workflow_dispatch:
+    inputs:
+      deploy:
+        description: 'Deploy to ACA prod after build'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  ACR_LOGIN_SERVER: acragenticaiprod.azurecr.io
+  ACR_NAME: acragenticaiprod
+  IMAGE_NAME: agentic-jupyter-node
+  ACA_APP_NAME: ca-jupyter-node-agentic-prod
+  ACA_RESOURCE_GROUP: rg-agentic-prod
+
+jobs:
+  build-push:
+    name: Build & Push to ACR
+    if: github.repository_owner == 'LabmarketAI'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      sha_tag: ${{ steps.tags.outputs.sha_tag }}
+      version_tag: ${{ steps.tags.outputs.version_tag }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Azure Login (OIDC)
+        if: github.event_name != 'pull_request'
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        if: github.event_name != 'pull_request'
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Resolve image tags
+        id: tags
+        run: |
+          SHA_TAG="${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}"
+          echo "sha_tag=${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "version_tag=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "push_tags=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:${VERSION},${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version_tag=" >> "$GITHUB_OUTPUT"
+            echo "push_tags=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest,${SHA_TAG}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build and push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.tags.outputs.push_tags }}
+          cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+      - name: Build only (PR)
+        if: github.event_name == 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+
+  deploy:
+    name: Deploy to ACA prod
+    needs: build-push
+    if: |
+      github.repository_owner == 'LabmarketAI' && (
+        (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) ||
+        (github.event_name == 'workflow_dispatch' && inputs.deploy)
+      )
+    runs-on: ubuntu-latest
+    environment: prod
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Update ACA revision
+        run: |
+          IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
+          az containerapp update \
+            --name ${{ env.ACA_APP_NAME }} \
+            --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
+            --image "${IMAGE}" \
+            --output none
+          echo "Deployed ${IMAGE} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
