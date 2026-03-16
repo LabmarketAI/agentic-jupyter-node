@@ -33,6 +33,7 @@ jobs:
     name: Build & Push to ACR
     if: github.repository_owner == 'LabmarketAI'
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       id-token: write
       contents: read
