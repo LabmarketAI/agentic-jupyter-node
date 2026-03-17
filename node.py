@@ -38,10 +38,12 @@ from a2a.client.client_factory import ClientFactory, ClientConfig
 from a2a.server.agent_execution import AgentExecutor
 from a2a.types import AgentCard, AgentCapabilities, AgentExtension, AgentSkill, Message
 from a2a.utils import new_agent_text_message
+import websockets as _ws_lib
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from starlette.websockets import WebSocket
 
 logger = structlog.get_logger()
 
@@ -490,7 +492,7 @@ class JupyterNode(BaseNode):
                     AgentExtension(
                         uri="jupyter-lab",
                         description="JupyterLab web UI",
-                        params={"url": f"http://{node_name}:{lab_port}/lab"},
+                        params={"url": "/jupyter/lab"},
                     )
                 ]
             ),
@@ -526,6 +528,7 @@ class JupyterNode(BaseNode):
                 f"--IdentityProvider.token={token}",
                 "--ServerApp.allow_origin=*",
                 "--ServerApp.iopub_data_rate_limit=0",
+                "--ServerApp.base_url=/jupyter/lab",
             ]
             proc = await asyncio.create_subprocess_exec(*cmd)
             logger.info("jupyterlab.started", port=lab_port)
@@ -543,6 +546,100 @@ class JupyterNode(BaseNode):
                 logger.info("jupyterlab.stopped")
 
         app.router.lifespan_context = _lifespan_with_lab
+
+        # ── JupyterLab reverse proxy (/jupyter/lab → localhost:8888) ──────────
+        # JupyterLab runs on port 8888 inside the container with
+        # --ServerApp.base_url=/jupyter/lab.  All HTTP and WebSocket traffic
+        # from the orchestrator is forwarded here transparently.
+
+        _HOP_HEADERS = frozenset({
+            "connection", "transfer-encoding", "te", "trailers",
+            "upgrade", "keep-alive", "proxy-authorization", "proxy-authenticate",
+        })
+
+        _STRIP_FOR_JUPYTER = _HOP_HEADERS | {
+            "host", "x-forwarded-host", "x-forwarded-for",
+            "x-forwarded-proto", "x-forwarded-port",
+        }
+
+        async def _lab_http(request: Request, path: str) -> Response:
+            qs = str(request.query_params)
+            target = f"http://localhost:{lab_port}/jupyter/lab"
+            if path:
+                target += f"/{path}"
+            if qs:
+                target += f"?{qs}"
+            # Strip all forwarded-host headers and set host=localhost so that
+            # JupyterLab constructs internal redirect URLs (localhost:8888/...)
+            # rather than using the public ACA hostname + port 8888, which is
+            # not publicly accessible.
+            fwd = {k: v for k, v in request.headers.items()
+                   if k.lower() not in _STRIP_FOR_JUPYTER}
+            fwd["host"] = f"localhost:{lab_port}"
+            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as c:
+                resp = await c.request(
+                    method=request.method, url=target,
+                    headers=fwd, content=await request.body(),
+                )
+            hdrs = {k: v for k, v in resp.headers.items()
+                    if k.lower() not in _HOP_HEADERS}
+            return Response(content=resp.content, status_code=resp.status_code, headers=hdrs)
+
+        @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        async def lab_proxy_root(request: Request) -> Response:
+            return await _lab_http(request, "")
+
+        @app.api_route("/jupyter/lab/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        async def lab_proxy(request: Request, path: str) -> Response:
+            return await _lab_http(request, path)
+
+        @app.websocket("/jupyter/lab/{path:path}")
+        async def lab_ws_proxy(websocket: WebSocket, path: str) -> None:
+            qs = str(websocket.query_params)
+            target = f"ws://localhost:{lab_port}/jupyter/lab/{path}"
+            if qs:
+                target += f"?{qs}"
+            skip = {"host", "connection", "upgrade", "sec-websocket-key",
+                    "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-accept"}
+            extra = [(k.encode(), v.encode()) for k, v in websocket.headers.items()
+                     if k.lower() not in skip]
+            await websocket.accept()
+            try:
+                async with _ws_lib.connect(target, additional_headers=extra) as ws:
+                    async def _to_server():
+                        try:
+                            while True:
+                                msg = await websocket.receive()
+                                if msg.get("type") == "websocket.disconnect":
+                                    break
+                                if msg.get("bytes"):
+                                    await ws.send(msg["bytes"])
+                                elif msg.get("text"):
+                                    await ws.send(msg["text"])
+                        except Exception:
+                            pass
+
+                    async def _to_client():
+                        try:
+                            async for msg in ws:
+                                if isinstance(msg, bytes):
+                                    await websocket.send_bytes(msg)
+                                else:
+                                    await websocket.send_text(msg)
+                        except Exception:
+                            pass
+
+                    tasks = [asyncio.create_task(_to_server()), asyncio.create_task(_to_client())]
+                    await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+                    for t in tasks:
+                        t.cancel()
+            except Exception:
+                pass
+            finally:
+                try:
+                    await websocket.close()
+                except Exception:
+                    pass
 
         # ── POST /infer — direct model-node inference (no A2A) ────────────────
         @app.post("/infer")
