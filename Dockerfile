@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM ghcr.io/labmarketai/agentic-node-base:latest
+FROM acragenticaiprod.azurecr.io/agentic-node-base:latest
 
 USER root
 
