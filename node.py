@@ -557,6 +557,11 @@ class JupyterNode(BaseNode):
             "upgrade", "keep-alive", "proxy-authorization", "proxy-authenticate",
         })
 
+        _STRIP_FOR_JUPYTER = _HOP_HEADERS | {
+            "host", "x-forwarded-host", "x-forwarded-for",
+            "x-forwarded-proto", "x-forwarded-port",
+        }
+
         async def _lab_http(request: Request, path: str) -> Response:
             qs = str(request.query_params)
             target = f"http://localhost:{lab_port}/jupyter/lab"
@@ -564,8 +569,13 @@ class JupyterNode(BaseNode):
                 target += f"/{path}"
             if qs:
                 target += f"?{qs}"
+            # Strip all forwarded-host headers and set host=localhost so that
+            # JupyterLab constructs internal redirect URLs (localhost:8888/...)
+            # rather than using the public ACA hostname + port 8888, which is
+            # not publicly accessible.
             fwd = {k: v for k, v in request.headers.items()
-                   if k.lower() not in _HOP_HEADERS | {"host"}}
+                   if k.lower() not in _STRIP_FOR_JUPYTER}
+            fwd["host"] = f"localhost:{lab_port}"
             async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as c:
                 resp = await c.request(
                     method=request.method, url=target,
