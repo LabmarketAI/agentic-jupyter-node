@@ -562,27 +562,38 @@ class JupyterNode(BaseNode):
             "x-forwarded-proto", "x-forwarded-port",
         }
 
+        _LOCALHOST_LAB = f"http://localhost:{lab_port}/jupyter/lab"
+
         async def _lab_http(request: Request, path: str) -> Response:
             qs = str(request.query_params)
-            target = f"http://localhost:{lab_port}/jupyter/lab"
+            target = _LOCALHOST_LAB
             if path:
                 target += f"/{path}"
             if qs:
                 target += f"?{qs}"
-            # Strip all forwarded-host headers and set host=localhost so that
-            # JupyterLab constructs internal redirect URLs (localhost:8888/...)
-            # rather than using the public ACA hostname + port 8888, which is
-            # not publicly accessible.
+            # Strip all forwarded-host headers and pin Host to localhost so
+            # JupyterLab never sees the public ACA hostname and can't embed it
+            # in redirect Location headers.
+            # follow_redirects=False: let redirect responses pass through to
+            # the browser so it updates its URL bar correctly (e.g. /jupyter/lab
+            # → /jupyter/lab/lab).  We rewrite the Location header from the
+            # internal localhost URL back to the proxy-relative path so the
+            # browser follows the redirect through the orchestrator proxy.
             fwd = {k: v for k, v in request.headers.items()
                    if k.lower() not in _STRIP_FOR_JUPYTER}
             fwd["host"] = f"localhost:{lab_port}"
-            async with httpx.AsyncClient(follow_redirects=True, timeout=30.0) as c:
+            async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as c:
                 resp = await c.request(
                     method=request.method, url=target,
                     headers=fwd, content=await request.body(),
                 )
             hdrs = {k: v for k, v in resp.headers.items()
                     if k.lower() not in _HOP_HEADERS}
+            # Rewrite any internal localhost redirect to a proxy-relative path.
+            if "location" in hdrs:
+                hdrs["location"] = hdrs["location"].replace(
+                    _LOCALHOST_LAB, "/jupyter/lab"
+                )
             return Response(content=resp.content, status_code=resp.status_code, headers=hdrs)
 
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])

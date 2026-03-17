@@ -55,7 +55,6 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Azure Login (OIDC)
-        if: github.event_name != 'pull_request'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -63,7 +62,6 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Log in to ACR
-        if: github.event_name != 'pull_request'
         run: az acr login --name ${{ env.ACR_NAME }}
 
       - name: Resolve image tags
@@ -81,21 +79,13 @@ jobs:
           fi
 
       - name: Build and push
-        if: github.event_name != 'pull_request'
         uses: docker/build-push-action@v6
         with:
           context: .
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.push_tags }}
           cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
-
-      - name: Build only (PR)
-        if: github.event_name == 'pull_request'
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          push: false
 
   deploy:
     name: Deploy to ACA prod
