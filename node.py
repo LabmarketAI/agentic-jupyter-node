@@ -604,14 +604,14 @@ class JupyterNode(BaseNode):
                     method=request.method, url=target,
                     headers=fwd, content=await request.body(),
                 )
-            hdrs = {k: v for k, v in resp.headers.items()
-                    if k.lower() not in _HOP_HEADERS}
-            # Rewrite any internal localhost redirect to a proxy-relative path.
-            if "location" in hdrs:
-                hdrs["location"] = hdrs["location"].replace(
-                    _LOCALHOST_LAB, "/jupyter/lab"
-                )
-            return Response(content=resp.content, status_code=resp.status_code, headers=hdrs)
+            out = Response(content=resp.content, status_code=resp.status_code)
+            for k, v in resp.headers.multi_items():
+                if k.lower() in _HOP_HEADERS:
+                    continue
+                if k.lower() == "location":
+                    v = v.replace(_LOCALHOST_LAB, "/jupyter/lab")
+                out.headers.append(k, v)
+            return out
 
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy_root(request: Request) -> Response:
