@@ -610,6 +610,13 @@ class JupyterNode(BaseNode):
                     continue
                 if k.lower() == "location":
                     v = v.replace(_LOCALHOST_LAB, "/jupyter/lab")
+                if k.lower() == "set-cookie":
+                    parsed = SimpleCookie()
+                    parsed.load(v)
+                    if parsed:
+                        for morsel in parsed.values():
+                            out.headers.append("set-cookie", morsel.OutputString().rstrip(","))
+                        continue
                 out.headers.append(k, v)
             return out
 
