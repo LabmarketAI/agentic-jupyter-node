@@ -11,11 +11,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         texlive-plain-generic && \
     rm -rf /var/lib/apt/lists/*
 
-# Python deps — pip wheel cache persists across builds (BuildKit cache mount)
-# Copy requirements first so code changes don't bust this layer
+# Python deps
+# Copy requirements first so code changes don't bust this layer.
+# Use a standard pip install so ACR builds work even without BuildKit mounts.
 COPY requirements.txt /app/requirements.txt
-RUN --mount=type=cache,target=/root/.cache/pip \
-    pip install -r /app/requirements.txt
+RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Playwright browser binaries must live in the image
 RUN playwright install --with-deps chromium
