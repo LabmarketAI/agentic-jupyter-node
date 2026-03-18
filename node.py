@@ -22,6 +22,7 @@ import re
 import sys
 import structlog
 from contextlib import asynccontextmanager
+from http.cookies import SimpleCookie
 from typing import Any
 
 try:
@@ -527,6 +528,7 @@ class JupyterNode(BaseNode):
                 "--allow-root",
                 f"--IdentityProvider.token={token}",
                 "--ServerApp.allow_origin=*",
+                "--ServerApp.disable_check_xsrf=True",
                 "--ServerApp.iopub_data_rate_limit=0",
                 "--ServerApp.base_url=/jupyter/lab",
             ]
@@ -560,6 +562,7 @@ class JupyterNode(BaseNode):
         _STRIP_FOR_JUPYTER = _HOP_HEADERS | {
             "host", "x-forwarded-host", "x-forwarded-for",
             "x-forwarded-proto", "x-forwarded-port",
+            "origin", "referer",
         }
 
         _LOCALHOST_LAB = f"http://localhost:{lab_port}/jupyter/lab"
@@ -582,19 +585,38 @@ class JupyterNode(BaseNode):
             fwd = {k: v for k, v in request.headers.items()
                    if k.lower() not in _STRIP_FOR_JUPYTER}
             fwd["host"] = f"localhost:{lab_port}"
+
+            # Jupyter requires a token header or form arg on unsafe methods.
+            # When the browser only sends the _xsrf cookie through the proxy,
+            # synthesize X-XSRFToken to avoid 403 "_xsrf argument missing".
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and "x-xsrftoken" not in {
+                k.lower() for k in fwd
+            }:
+                cookie_header = request.headers.get("cookie", "")
+                if cookie_header:
+                    cookies = SimpleCookie()
+                    cookies.load(cookie_header)
+                    xsrf = cookies.get("_xsrf")
+                    if xsrf and xsrf.value:
+                        fwd["X-XSRFToken"] = xsrf.value
+
             async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as c:
                 resp = await c.request(
                     method=request.method, url=target,
                     headers=fwd, content=await request.body(),
                 )
-            hdrs = {k: v for k, v in resp.headers.items()
-                    if k.lower() not in _HOP_HEADERS}
-            # Rewrite any internal localhost redirect to a proxy-relative path.
-            if "location" in hdrs:
-                hdrs["location"] = hdrs["location"].replace(
-                    _LOCALHOST_LAB, "/jupyter/lab"
-                )
-            return Response(content=resp.content, status_code=resp.status_code, headers=hdrs)
+            out = Response(content=resp.content, status_code=resp.status_code)
+            for k, v in resp.headers.multi_items():
+                kl = k.lower()
+                if kl in _HOP_HEADERS or kl == "content-length":
+                    continue
+                if kl == "location":
+                    v = v.replace(_LOCALHOST_LAB, "/jupyter/lab")
+                if kl == "set-cookie":
+                    out.headers.append(k, v)
+                else:
+                    out.headers[k] = v
+            return out
 
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy_root(request: Request) -> Response:
