@@ -22,6 +22,7 @@ import re
 import sys
 import structlog
 from contextlib import asynccontextmanager
+from http.cookies import SimpleCookie
 from typing import Any
 
 try:
@@ -560,6 +561,7 @@ class JupyterNode(BaseNode):
         _STRIP_FOR_JUPYTER = _HOP_HEADERS | {
             "host", "x-forwarded-host", "x-forwarded-for",
             "x-forwarded-proto", "x-forwarded-port",
+            "origin", "referer",
         }
 
         _LOCALHOST_LAB = f"http://localhost:{lab_port}/jupyter/lab"
@@ -582,6 +584,21 @@ class JupyterNode(BaseNode):
             fwd = {k: v for k, v in request.headers.items()
                    if k.lower() not in _STRIP_FOR_JUPYTER}
             fwd["host"] = f"localhost:{lab_port}"
+
+            # Jupyter requires a token header or form arg on unsafe methods.
+            # When the browser only sends the _xsrf cookie through the proxy,
+            # synthesize X-XSRFToken to avoid 403 "_xsrf argument missing".
+            if request.method in {"POST", "PUT", "PATCH", "DELETE"} and "x-xsrftoken" not in {
+                k.lower() for k in fwd
+            }:
+                cookie_header = request.headers.get("cookie", "")
+                if cookie_header:
+                    cookies = SimpleCookie()
+                    cookies.load(cookie_header)
+                    xsrf = cookies.get("_xsrf")
+                    if xsrf and xsrf.value:
+                        fwd["X-XSRFToken"] = xsrf.value
+
             async with httpx.AsyncClient(follow_redirects=False, timeout=30.0) as c:
                 resp = await c.request(
                     method=request.method, url=target,
