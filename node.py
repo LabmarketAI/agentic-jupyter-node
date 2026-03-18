@@ -607,11 +607,15 @@ class JupyterNode(BaseNode):
                 )
             out = Response(content=resp.content, status_code=resp.status_code)
             for k, v in resp.headers.multi_items():
-                if k.lower() in _HOP_HEADERS:
+                kl = k.lower()
+                if kl in _HOP_HEADERS or kl == "content-length":
                     continue
-                if k.lower() == "location":
+                if kl == "location":
                     v = v.replace(_LOCALHOST_LAB, "/jupyter/lab")
-                out.headers.append(k, v)
+                if kl == "set-cookie":
+                    out.headers.append(k, v)
+                else:
+                    out.headers[k] = v
             return out
 
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
