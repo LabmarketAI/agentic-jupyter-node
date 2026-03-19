@@ -97,6 +97,9 @@ jobs:
       )
     runs-on: ubuntu-latest
     environment: prod
+    permissions:
+      id-token: write
+      contents: read
 
     steps:
       - name: Azure Login (OIDC)
