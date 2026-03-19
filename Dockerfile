@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-FROM acragenticaiprod.azurecr.io/agentic-node-base:latest
+ARG BASE_IMAGE=ghcr.io/labmarketai/agentic-node-base:latest
+FROM ${BASE_IMAGE}
 
 USER root
 
