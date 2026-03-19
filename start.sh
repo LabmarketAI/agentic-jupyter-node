@@ -20,9 +20,12 @@ if [ -d /app/notebooks ]; then
         date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SEED_MARKER"
     fi
 
-    # Remove stale README notebook copies from persistent workspaces.
-    rm -f "$WORKSPACE/README.ipynb"
-    rm -f "$WORKSPACE/notebooks/README.ipynb"
+    # Keep deployed README notebook synchronized for persistent workspaces.
+    if [ -f /app/notebooks/README.ipynb ]; then
+        mkdir -p "$WORKSPACE/notebooks"
+        cp /app/notebooks/README.ipynb "$WORKSPACE/notebooks/README.ipynb"
+        cp /app/notebooks/README.ipynb "$WORKSPACE/README.ipynb"
+    fi
 fi
 
 # Start JupyterLab in background (no auth, bound to all interfaces)
