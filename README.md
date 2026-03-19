@@ -37,7 +37,9 @@ Notebooks you create in JupyterLab are saved to `./workspace/` on your host mach
 | `/workspace` | JupyterLab root inside the container |
 | `./notebooks/` | Demo notebooks baked into the image (tracked by git, read-only source) |
 
-On first start, the demo notebooks (`cheng_demo.ipynb`, `qiskit_demo.ipynb`) are copied into `./workspace/` automatically. They are only copied once — your edits are never overwritten.
+On first start, the demo notebooks (`cheng_demo.ipynb`, `qiskit_demo.ipynb`, `README.ipynb`) are copied into `./workspace/` automatically.
+
+To protect user content during upgrades, startup now writes a one-time marker file (`/workspace/.notebook_seed_v1`) after the initial seed. On later restarts/deployments, seeding is skipped entirely for that workspace.
 
 ### Finding your notebooks
 
@@ -79,6 +81,23 @@ cp -r workspace/ ~/my-labmarket-notebooks/
 git init workspace/
 cd workspace/ && git add . && git commit -m "my notebooks"
 ```
+
+### Deployed environments (production/staging)
+
+In deployed environments, notebook safety depends on where `JUPYTER_ROOT_DIR` is mounted.
+
+- If `/workspace` is backed by persistent storage (for example Azure Files), user notebooks survive container revisions and redeployments.
+- If `/workspace` is ephemeral container storage, notebooks are lost when the container is replaced.
+
+Recommended production pattern:
+
+1. Mount persistent storage at the same path used by Jupyter root (`JUPYTER_ROOT_DIR`, default `/workspace`).
+2. Keep demo notebooks in `/app/notebooks` (image content) and user work in `/workspace` (persistent data).
+3. Treat `/app` as immutable release content and `/workspace` as user-owned content.
+4. Snapshot or back up `/workspace` on a schedule.
+5. Never mount user notebooks over `/app/notebooks`.
+
+With this layout, deployments update the application image without overwriting notebooks created by users.
 
 ---
 

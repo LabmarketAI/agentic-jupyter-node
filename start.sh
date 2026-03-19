@@ -9,12 +9,16 @@ export PATH="${PATH}:/home/appuser/.local/bin"
 WORKSPACE="${JUPYTER_ROOT_DIR:-/workspace}"
 mkdir -p "$WORKSPACE"
 if [ -d /app/notebooks ]; then
-    for nb in /app/notebooks/*.ipynb; do
-        [ -f "$nb" ] || continue
-        dest="$WORKSPACE/$(basename "$nb")"
-        # Only copy if the file does not already exist so user edits are preserved
-        [ -f "$dest" ] || cp "$nb" "$dest"
-    done
+    SEED_MARKER="$WORKSPACE/.notebook_seed_v1"
+    if [ ! -f "$SEED_MARKER" ]; then
+        for nb in /app/notebooks/*.ipynb; do
+            [ -f "$nb" ] || continue
+            dest="$WORKSPACE/$(basename "$nb")"
+            # Only copy if the file does not already exist so user edits are preserved
+            [ -f "$dest" ] || cp "$nb" "$dest"
+        done
+        date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SEED_MARKER"
+    fi
 fi
 
 # Start JupyterLab in background (no auth, bound to all interfaces)
