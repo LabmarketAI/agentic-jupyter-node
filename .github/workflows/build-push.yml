@@ -161,13 +161,15 @@ jobs:
 
           props = doc.setdefault('properties', {})
           template = props.setdefault('template', {})
-          containers = template.setdefault('containers', [])
+          containers = template.get('containers') or []
+          template['containers'] = containers
           if not containers:
             raise RuntimeError('No containers found in Container App template')
 
           container = containers[0]
           container['image'] = os.environ['IMAGE']
-          env = container.setdefault('env', [])
+          env = container.get('env') or []
+          container['env'] = env
 
           found_env = False
           for item in env:
@@ -179,7 +181,8 @@ jobs:
           if not found_env:
             env.append({'name': 'JUPYTER_ROOT_DIR', 'value': '/workspace'})
 
-          volumes = template.setdefault('volumes', [])
+          volumes = template.get('volumes') or []
+          template['volumes'] = volumes
           if not any(v.get('name') == 'workspace' for v in volumes):
             volumes.append({
               'name': 'workspace',
@@ -187,7 +190,8 @@ jobs:
               'storageName': 'jupyter-workspace'
             })
 
-          volume_mounts = container.setdefault('volumeMounts', [])
+          volume_mounts = container.get('volumeMounts') or []
+          container['volumeMounts'] = volume_mounts
           if not any(m.get('volumeName') == 'workspace' and m.get('mountPath') == '/workspace' for m in volume_mounts):
             volume_mounts.append({
               'volumeName': 'workspace',
