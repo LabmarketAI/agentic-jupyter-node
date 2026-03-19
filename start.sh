@@ -19,6 +19,11 @@ if [ -d /app/notebooks ]; then
         done
         date -u +"%Y-%m-%dT%H:%M:%SZ" > "$SEED_MARKER"
     fi
+
+    # Keep deployed guidance current for persistent workspaces.
+    if [ -f /app/notebooks/README.ipynb ]; then
+        cp /app/notebooks/README.ipynb "$WORKSPACE/README.ipynb"
+    fi
 fi
 
 # Start JupyterLab in background (no auth, bound to all interfaces)
