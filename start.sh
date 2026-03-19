@@ -23,6 +23,8 @@ if [ -d /app/notebooks ]; then
     # Keep deployed guidance current for persistent workspaces.
     if [ -f /app/notebooks/README.ipynb ]; then
         cp /app/notebooks/README.ipynb "$WORKSPACE/README.ipynb"
+        mkdir -p "$WORKSPACE/notebooks"
+        cp /app/notebooks/README.ipynb "$WORKSPACE/notebooks/README.ipynb"
     fi
 fi
 
