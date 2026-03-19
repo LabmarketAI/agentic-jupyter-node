@@ -25,6 +25,7 @@ env:
   ACR_LOGIN_SERVER: acragenticaiprod.azurecr.io
   ACR_NAME: acragenticaiprod
   IMAGE_NAME: agentic-jupyter-node
+  ACA_ENV_NAME: cae-agentic-prod
   ACA_APP_NAME: ca-jupyter-node-agentic-prod
   ACA_RESOURCE_GROUP: rg-agentic-prod
 
@@ -112,9 +113,46 @@ jobs:
       - name: Update ACA revision
         run: |
           IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
+
+          STORAGE_ACCOUNT=$(az storage account list \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "[0].name" -o tsv)
+
+          if [[ -z "$STORAGE_ACCOUNT" ]]; then
+            echo "No storage account found in ${{ env.ACA_RESOURCE_GROUP }}" >&2
+            exit 1
+          fi
+
+          STORAGE_KEY=$(az storage account keys list \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --account-name "$STORAGE_ACCOUNT" \
+            --query "[0].value" -o tsv)
+
+          az storage share-rm create \
+            --storage-account "$STORAGE_ACCOUNT" \
+            --name jupyter-workspace \
+            --quota 100 \
+            --output none || true
+
+          az containerapp env storage set \
+            --name "${{ env.ACA_ENV_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --storage-name jupyter-workspace \
+            --azure-file-account-name "$STORAGE_ACCOUNT" \
+            --azure-file-account-key "$STORAGE_KEY" \
+            --azure-file-share-name jupyter-workspace \
+            --access-mode ReadWrite \
+            --output none
+
           az containerapp update \
             --name ${{ env.ACA_APP_NAME }} \
             --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
             --image "${IMAGE}" \
+            --set-env-vars "JUPYTER_ROOT_DIR=/workspace" \
+            --set template.volumes[0].name=workspace \
+                  template.volumes[0].storageType=AzureFile \
+                  template.volumes[0].storageName=jupyter-workspace \
+                  template.containers[0].volumeMounts[0].volumeName=workspace \
+                  template.containers[0].volumeMounts[0].mountPath=/workspace \
             --output none
           echo "Deployed ${IMAGE} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY

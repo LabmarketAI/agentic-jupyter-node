@@ -6,106 +6,63 @@ Jupyter node for the Labmarket agentic ecosystem. Provides an interactive Jupyte
 
 ---
 
-## Quick Start
+## Deployed JupyterLab (Production-Focused)
 
-This node is meant to run as part of the full stack. From the orchestrator repo:
+In deployed environments, notebooks are saved in a persistent Azure Files share mounted at `/workspace` inside the Jupyter container.
 
-```bash
-cd agentic-orchestrator
-cp .env.example .env
-make up
-```
+- Application code and demo notebooks live in the image at `/app`.
+- User notebooks and generated files live in `/workspace`.
+- Deployments replace the image, but preserve `/workspace`.
 
-`make up` assigns ports dynamically and prints all URLs, including the JupyterLab address. To run this node in isolation:
-
-```bash
-cp .env.example .env
-docker compose up --build
-```
+This split is what keeps user notebooks safe across revisions and rollouts.
 
 ---
 
-## Saving Your Notebooks Locally
+## How Notebook Saving Works In Deployed Environments
 
-Notebooks you create in JupyterLab are saved to `./workspace/` on your host machine — they survive container restarts and are never committed to git.
+Notebooks created in JupyterLab are saved under `/workspace`.
+
+In production, `/workspace` is mounted from an Azure Files share (`jupyter-workspace`) configured in Azure Container Apps infrastructure.
 
 ### How it works
 
 | Path | What it is |
 |------|-----------|
-| `./workspace/` | Host directory, bind-mounted into the container at `/workspace` |
-| `/workspace` | JupyterLab root inside the container |
-| `./notebooks/` | Demo notebooks baked into the image (tracked by git, read-only source) |
+| `/workspace` | JupyterLab root and persistent user data location |
+| `/app/notebooks` | Demo notebooks baked into the image (release content) |
+| Azure Files share (`jupyter-workspace`) | Backing storage mounted to `/workspace` |
 
-On first start, the demo notebooks (`cheng_demo.ipynb`, `qiskit_demo.ipynb`, `README.ipynb`) are copied into `./workspace/` automatically.
+On first start, the demo notebooks (`cheng_demo.ipynb`, `qiskit_demo.ipynb`, `README.ipynb`) are copied into `/workspace` automatically.
 
-To protect user content during upgrades, startup now writes a one-time marker file (`/workspace/.notebook_seed_v1`) after the initial seed. On later restarts/deployments, seeding is skipped entirely for that workspace.
+To protect user content during upgrades, startup writes a one-time marker file (`/workspace/.notebook_seed_v1`) after initial seed. On later restarts/deployments, seeding is skipped entirely for that workspace.
 
 ### Finding your notebooks
 
 ```
-agentic-jupyter-node/
-└── workspace/           ← your notebooks live here (gitignored)
-    ├── cheng_demo.ipynb
-    ├── qiskit_demo.ipynb
-    └── my_notebook.ipynb
+workspace/
+├── cheng_demo.ipynb
+├── qiskit_demo.ipynb
+├── README.ipynb
+└── my_notebook.ipynb
 ```
 
-Docker creates the `workspace/` directory on first `docker compose up` — no manual setup needed.
-
-### Using a different local directory
-
-Set `JUPYTER_ROOT_DIR` to any path on the host before starting:
-
-```bash
-# In .env
-JUPYTER_ROOT_DIR=/home/yourname/notebooks
-```
-
-Then update the volume mount in `docker-compose.yml` to match:
-
-```yaml
-volumes:
-  - /home/yourname/notebooks:/home/yourname/notebooks
-```
-
-### Backing up your work
-
-Because `workspace/` is a plain directory on your host, standard tools work:
-
-```bash
-# Copy to another location
-cp -r workspace/ ~/my-labmarket-notebooks/
-
-# Or push a personal fork with your notebooks tracked
-git init workspace/
-cd workspace/ && git add . && git commit -m "my notebooks"
-```
-
-### Deployed environments (production/staging)
-
-In deployed environments, notebook safety depends on where `JUPYTER_ROOT_DIR` is mounted.
-
-- If `/workspace` is backed by persistent storage (for example Azure Files), user notebooks survive container revisions and redeployments.
-- If `/workspace` is ephemeral container storage, notebooks are lost when the container is replaced.
-
-Recommended production pattern:
+### Best Practices (Do Not Lose User Notebooks)
 
 1. Mount persistent storage at the same path used by Jupyter root (`JUPYTER_ROOT_DIR`, default `/workspace`).
-2. Keep demo notebooks in `/app/notebooks` (image content) and user work in `/workspace` (persistent data).
+2. Keep demo notebooks in `/app/notebooks` (image content) and all user work in `/workspace` (persistent data).
 3. Treat `/app` as immutable release content and `/workspace` as user-owned content.
 4. Snapshot or back up `/workspace` on a schedule.
-5. Never mount user notebooks over `/app/notebooks`.
+5. Never write user notebooks into `/app` paths.
 
 With this layout, deployments update the application image without overwriting notebooks created by users.
 
 ---
 
-## Accessing JupyterLab
+## Accessing JupyterLab In Deployment
 
-When running via `make up` in the orchestrator, JupyterLab is available at the URL printed in the terminal (typically http://localhost:8005/lab). No token or password is required in development.
+JupyterLab is exposed through the deployed stack URL published by the orchestrator environment.
 
-When running this node standalone, JupyterLab is at http://localhost:8888/lab.
+If you open JupyterLab in deployment and create/save notebooks, files are written to `/workspace` and retained across deployments as long as the mounted Azure Files share is preserved.
 
 ---
 
