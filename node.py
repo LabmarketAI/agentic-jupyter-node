@@ -520,6 +520,7 @@ class JupyterNode(BaseNode):
 
         @asynccontextmanager
         async def _lifespan_with_lab(fastapi_app):
+            workspace = os.environ.get("JUPYTER_ROOT_DIR", "/workspace")
             cmd = [
                 sys.executable, "-m", "jupyterlab",
                 "--ip=0.0.0.0",
@@ -531,6 +532,7 @@ class JupyterNode(BaseNode):
                 "--ServerApp.disable_check_xsrf=True",
                 "--ServerApp.iopub_data_rate_limit=0",
                 "--ServerApp.base_url=/jupyter/lab",
+                f"--ServerApp.root_dir={workspace}",
             ]
             proc = await asyncio.create_subprocess_exec(*cmd)
             logger.info("jupyterlab.started", port=lab_port)
@@ -754,9 +756,9 @@ class JupyterNode(BaseNode):
             Proxy /data/summary from cheng-dataset-node.
             Returns paper reference and row counts for all four tables.
             """
-            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            cheng_url = os.environ.get("SIBLING_CHENG_DATASET_NODE_URL", "").rstrip("/")
             if not cheng_url:
-                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+                return JSONResponse({"error": "SIBLING_CHENG_DATASET_NODE_URL not set"}, status_code=503)
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     r = await client.get(f"{cheng_url}/data/summary")
@@ -772,9 +774,9 @@ class JupyterNode(BaseNode):
             Proxy a read-only SQL query to cheng-dataset-node /data/query.
             Body: { "sql": "SELECT ..." }
             """
-            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            cheng_url = os.environ.get("SIBLING_CHENG_DATASET_NODE_URL", "").rstrip("/")
             if not cheng_url:
-                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+                return JSONResponse({"error": "SIBLING_CHENG_DATASET_NODE_URL not set"}, status_code=503)
             body = await request.json()
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
@@ -792,9 +794,9 @@ class JupyterNode(BaseNode):
             Body: { "question": "How many drug targets are there?" }
             Returns: { "answer": "..." }
             """
-            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            cheng_url = os.environ.get("SIBLING_CHENG_DATASET_NODE_URL", "").rstrip("/")
             if not cheng_url:
-                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+                return JSONResponse({"error": "SIBLING_CHENG_DATASET_NODE_URL not set"}, status_code=503)
             body = await request.json()
             question = body.get("question", "")
             if not question:
@@ -841,9 +843,9 @@ class JupyterNode(BaseNode):
             Returns {drug_id, nodes, edges, node_count, edge_count}.
             Nodes carry an is_target flag; layout is done client-side.
             """
-            cheng_url = os.environ.get("SIBLING_CHENG_NODE_URL", "").rstrip("/")
+            cheng_url = os.environ.get("SIBLING_CHENG_DATASET_NODE_URL", "").rstrip("/")
             if not cheng_url:
-                return JSONResponse({"error": "SIBLING_CHENG_NODE_URL not set"}, status_code=503)
+                return JSONResponse({"error": "SIBLING_CHENG_DATASET_NODE_URL not set"}, status_code=503)
             try:
                 async with httpx.AsyncClient(timeout=30.0) as client:
                     r = await client.get(
