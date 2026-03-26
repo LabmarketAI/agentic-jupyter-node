@@ -4,24 +4,23 @@ set -e
 export PATH="${PATH}:/home/appuser/.local/bin"
 
 # Ensure the workspace directory exists and seed template notebooks.
-# Templates under /app/notebooks are treated as canonical starters and are
-# backfilled into the workspace whenever missing (for example, if a user deleted
-# one), while existing workspace files are never overwritten.
+# NOTEBOOK_SYNC_MODE controls refresh behavior for files under /app/notebooks:
+#   - missing   (default): only backfill missing files
+#   - overwrite: replace existing workspace copies on every startup
 WORKSPACE="${JUPYTER_ROOT_DIR:-/workspace}"
+NOTEBOOK_SYNC_MODE="${NOTEBOOK_SYNC_MODE:-missing}"
 mkdir -p "$WORKSPACE"
 if [ -d /app/notebooks ]; then
+    mkdir -p "$WORKSPACE/notebooks"
     for nb in /app/notebooks/*.ipynb; do
         [ -f "$nb" ] || continue
-        dest="$WORKSPACE/$(basename "$nb")"
-        [ -f "$dest" ] || cp "$nb" "$dest"
+        base="$(basename "$nb")"
+        for dest in "$WORKSPACE/$base" "$WORKSPACE/notebooks/$base"; do
+            if [ "$NOTEBOOK_SYNC_MODE" = "overwrite" ] || [ ! -f "$dest" ]; then
+                cp "$nb" "$dest"
+            fi
+        done
     done
-
-    # Keep deployed README notebook synchronized for persistent workspaces.
-    if [ -f /app/notebooks/README.ipynb ]; then
-        mkdir -p "$WORKSPACE/notebooks"
-        cp /app/notebooks/README.ipynb "$WORKSPACE/notebooks/README.ipynb"
-        cp /app/notebooks/README.ipynb "$WORKSPACE/README.ipynb"
-    fi
 fi
 
 # JupyterLab is started and managed by node.py (FastAPI lifespan).

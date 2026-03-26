@@ -198,6 +198,16 @@ jobs:
           if not found_agent_card_version:
             env.append({'name': 'AGENT_CARD_VERSION', 'value': os.environ['AGENT_CARD_VERSION']})
 
+          found_notebook_sync_mode = False
+          for item in env:
+            if item.get('name') == 'NOTEBOOK_SYNC_MODE':
+              item['value'] = 'overwrite'
+              item.pop('secretRef', None)
+              found_notebook_sync_mode = True
+              break
+          if not found_notebook_sync_mode:
+            env.append({'name': 'NOTEBOOK_SYNC_MODE', 'value': 'overwrite'})
+
           volumes = template.get('volumes') or []
           template['volumes'] = volumes
           if not any(v.get('name') == 'workspace' for v in volumes):
