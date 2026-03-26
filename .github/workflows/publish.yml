@@ -141,8 +141,10 @@ jobs:
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             VERSION="${GITHUB_REF#refs/tags/}"
             echo "tag=${{ env.ACR_IMAGE }}:${VERSION}" >> "$GITHUB_OUTPUT"
+            echo "agent_card_version=${VERSION#v}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${{ env.ACR_IMAGE }}:latest" >> "$GITHUB_OUTPUT"
+            echo "agent_card_version=sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Update ACA revision
@@ -151,6 +153,7 @@ jobs:
             --name "${{ env.ACA_APP_NAME }}" \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
             --image "${{ steps.image.outputs.tag }}" \
+            --set-env-vars "AGENT_CARD_VERSION=${{ steps.image.outputs.agent_card_version }}" \
             --output none
           echo "Deployed ${{ steps.image.outputs.tag }} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
 

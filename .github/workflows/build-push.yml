@@ -115,6 +115,12 @@ jobs:
         run: |
           IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
           export IMAGE
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            AGENT_CARD_VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            AGENT_CARD_VERSION="sha-${GITHUB_SHA::7}"
+          fi
+          export AGENT_CARD_VERSION
 
           STORAGE_ACCOUNT=$(az storage account list \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
@@ -181,6 +187,16 @@ jobs:
               break
           if not found_env:
             env.append({'name': 'JUPYTER_ROOT_DIR', 'value': '/workspace'})
+
+          found_agent_card_version = False
+          for item in env:
+            if item.get('name') == 'AGENT_CARD_VERSION':
+              item['value'] = os.environ['AGENT_CARD_VERSION']
+              item.pop('secretRef', None)
+              found_agent_card_version = True
+              break
+          if not found_agent_card_version:
+            env.append({'name': 'AGENT_CARD_VERSION', 'value': os.environ['AGENT_CARD_VERSION']})
 
           volumes = template.get('volumes') or []
           template['volumes'] = volumes
