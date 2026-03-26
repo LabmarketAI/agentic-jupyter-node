@@ -175,6 +175,9 @@ jobs:
 
           container = containers[0]
           container['image'] = os.environ['IMAGE']
+          # Ensure startup always runs /app/start.sh where notebook sync occurs.
+          container['command'] = ['sh', '/app/start.sh']
+          container['args'] = []
           env = container.get('env') or []
           container['env'] = env
 
