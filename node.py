@@ -16,6 +16,7 @@ Communication layers used:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import json
 import os
 import re
@@ -265,6 +266,8 @@ async def _run_cell(kernel_name: str, code: str, timeout: float = 30.0) -> dict:
                     asyncio.to_thread(kc.get_iopub_msg, timeout=timeout),
                     timeout=timeout + 5,
                 )
+                if inspect.isawaitable(msg):
+                    msg = await asyncio.wait_for(msg, timeout=timeout + 5)
             except asyncio.TimeoutError:
                 return {"outputs": outputs, "warning": "execution timed out"}
 
@@ -395,7 +398,14 @@ class JupyterExecutor(AgentExecutor):
     async def execute(self, context, event_queue) -> None:
         message: Message | None = getattr(context, "message", None)
         parts = getattr(message, "parts", []) or []
-        text = " ".join(getattr(p, "text", "") for p in parts if hasattr(p, "text")).strip()
+        # A2A parts may be plain objects (p.text) or RootModel wrappers (p.root.text).
+        text = " ".join(
+            (
+                getattr(getattr(p, "root", None), "text", None)
+                or getattr(p, "text", "")
+            )
+            for p in parts
+        ).strip()
 
         logger.info("jupyter_executor.execute", text_preview=text[:120])
 
