@@ -21,6 +21,7 @@ on:
 
 env:
   GHCR_IMAGE: ghcr.io/labmarketai/agentic-jupyter-node
+  ACR_IMAGE: acragenticaiprod.azurecr.io/agentic-jupyter-node
   PACKAGE_NAME: agentic-jupyter-node
   ACA_APP_NAME: ca-jupyter-node-agentic-prod
   ACA_RESOURCE_GROUP: rg-agentic-prod
@@ -138,10 +139,10 @@ jobs:
         id: image
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/v}"
-            echo "tag=${{ env.GHCR_IMAGE }}:${VERSION}" >> "$GITHUB_OUTPUT"
+            VERSION="${GITHUB_REF#refs/tags/}"
+            echo "tag=${{ env.ACR_IMAGE }}:${VERSION}" >> "$GITHUB_OUTPUT"
           else
-            echo "tag=${{ env.GHCR_IMAGE }}:latest" >> "$GITHUB_OUTPUT"
+            echo "tag=${{ env.ACR_IMAGE }}:latest" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Update ACA revision
