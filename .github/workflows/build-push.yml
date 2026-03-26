@@ -25,6 +25,7 @@ env:
   ACR_LOGIN_SERVER: acragenticaiprod.azurecr.io
   ACR_NAME: acragenticaiprod
   IMAGE_NAME: agentic-jupyter-node
+  GHCR_IMAGE: ghcr.io/labmarketai/agentic-jupyter-node
   ACA_ENV_NAME: cae-agentic-prod
   ACA_APP_NAME: ca-jupyter-node-agentic-prod
   ACA_RESOURCE_GROUP: rg-agentic-prod
@@ -88,6 +89,59 @@ jobs:
           tags: ${{ steps.tags.outputs.push_tags }}
           cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
           cache-to: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+
+  sync-ghcr:
+    name: Sync ACR image to GHCR
+    needs: build-push
+    if: github.repository_owner == 'LabmarketAI' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      packages: write
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ env.ACR_NAME }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Copy exact ACR artifact to GHCR
+        run: |
+          SRC_IMAGE="${{ needs.build-push.outputs.sha_tag }}"
+          docker pull "$SRC_IMAGE"
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+          TAGS=("sha-${SHORT_SHA}")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/}"
+            TAGS+=("$VERSION")
+            if [[ "$VERSION" == v* ]]; then
+              TAGS+=("${VERSION#v}")
+            fi
+            TAGS+=("latest")
+          else
+            TAGS+=("latest")
+          fi
+
+          for tag in "${TAGS[@]}"; do
+            DEST="${{ env.GHCR_IMAGE }}:${tag}"
+            docker tag "$SRC_IMAGE" "$DEST"
+            docker push "$DEST"
+            echo "Pushed $DEST" >> "$GITHUB_STEP_SUMMARY"
+          done
 
   deploy:
     name: Deploy to ACA prod
