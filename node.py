@@ -20,10 +20,12 @@ import inspect
 import json
 import os
 import re
+import shutil
 import sys
 import structlog
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
+from pathlib import Path
 from typing import Any
 
 try:
@@ -48,6 +50,50 @@ from starlette.responses import Response
 from starlette.websockets import WebSocket
 
 logger = structlog.get_logger()
+
+
+def _sync_template_notebooks() -> None:
+    """Copy bundled notebooks into runtime workspace targets."""
+    mode = os.environ.get("NOTEBOOK_SYNC_MODE", "missing").strip().lower()
+    overwrite = mode == "overwrite"
+    source_dir = Path("/app/notebooks")
+    if not source_dir.exists():
+        logger.warning("notebook.sync.source_missing", source=str(source_dir))
+        return
+
+    workspace = Path(os.environ.get("JUPYTER_ROOT_DIR", "/workspace"))
+    targets = [workspace, workspace / "notebooks", Path("/notebooks")]
+
+    copied = 0
+    skipped = 0
+    failed = 0
+    for nb in sorted(source_dir.glob("*.ipynb")):
+        for target_dir in targets:
+            try:
+                target_dir.mkdir(parents=True, exist_ok=True)
+                dest = target_dir / nb.name
+                if overwrite or not dest.exists():
+                    shutil.copy2(nb, dest)
+                    copied += 1
+                else:
+                    skipped += 1
+            except Exception as exc:
+                failed += 1
+                logger.warning(
+                    "notebook.sync.copy_failed",
+                    source=str(nb),
+                    destination=str(target_dir),
+                    error=str(exc),
+                )
+
+    logger.info(
+        "notebook.sync.completed",
+        mode=mode,
+        copied=copied,
+        skipped=skipped,
+        failed=failed,
+        workspace=str(workspace),
+    )
 
 # ── Bearer token auth middleware ──────────────────────────────────────────────
 
@@ -531,6 +577,7 @@ class JupyterNode(BaseNode):
         @asynccontextmanager
         async def _lifespan_with_lab(fastapi_app):
             workspace = os.environ.get("JUPYTER_ROOT_DIR", "/workspace")
+            _sync_template_notebooks()
             cmd = [
                 sys.executable, "-m", "jupyterlab",
                 "--ip=0.0.0.0",
