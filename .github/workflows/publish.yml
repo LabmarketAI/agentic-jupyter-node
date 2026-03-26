@@ -157,6 +157,23 @@ jobs:
             --output none
           echo "Deployed ${{ steps.image.outputs.tag }} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Point orchestrator to deployed jupyter FQDN
+        run: |
+          JUP_FQDN=$(az containerapp show \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          if [[ -z "$JUP_FQDN" ]]; then
+            echo "Unable to resolve jupyter FQDN" >&2
+            exit 1
+          fi
+          az containerapp update \
+            --name ca-orchestrator-agentic-prod \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --set-env-vars "SIBLING_JUPYTER_NODE_URL=https://${JUP_FQDN}" \
+            --output none
+          echo "Updated orchestrator SIBLING_JUPYTER_NODE_URL=https://${JUP_FQDN}" >> $GITHUB_STEP_SUMMARY
+
       - name: Verify health
         run: |
           sleep 60
