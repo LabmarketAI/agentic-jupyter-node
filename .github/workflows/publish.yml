@@ -138,7 +138,7 @@ jobs:
         id: image
         run: |
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
-            VERSION="${GITHUB_REF#refs/tags/}"
+            VERSION="${GITHUB_REF#refs/tags/v}"
             echo "tag=${{ env.GHCR_IMAGE }}:${VERSION}" >> "$GITHUB_OUTPUT"
           else
             echo "tag=${{ env.GHCR_IMAGE }}:latest" >> "$GITHUB_OUTPUT"
