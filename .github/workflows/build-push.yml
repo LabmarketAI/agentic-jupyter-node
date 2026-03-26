@@ -50,7 +50,8 @@ jobs:
           pip install pip-audit --quiet
           pip-audit -r requirements.txt --format markdown --output pip-audit.md || true
           cat pip-audit.md >> $GITHUB_STEP_SUMMARY 2>/dev/null || true
-          pip-audit -r requirements.txt
+          # CVE-2026-4539: pygments transitive dep — no fix released yet; re-evaluate when pygments >2.19.2 ships
+          pip-audit -r requirements.txt --ignore-vuln CVE-2026-4539
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
