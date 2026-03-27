@@ -283,8 +283,9 @@ jobs:
               'mountPath': '/workspace'
             })
 
+          output = {'properties': {'template': props['template']}}
           with open(path, 'w', encoding='utf-8') as f:
-            json.dump(doc, f)
+            json.dump(output, f)
           PY
 
           az containerapp update \
@@ -323,6 +324,41 @@ jobs:
             sleep 10
           done
 
+      - name: Verify jupyter health
+        run: |
+          # Jupyter starts slower than orchestrator — allow extra ramp time
+          sleep 90
+          FQDN=$(az containerapp show \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${FQDN}/health")
+          if [[ "$HTTP_STATUS" != "200" ]]; then
+            echo "Jupyter health check failed (HTTP $HTTP_STATUS)" >&2
+            exit 1
+          fi
+          echo "Health check passed (HTTP $HTTP_STATUS) — https://${FQDN}" >> $GITHUB_STEP_SUMMARY
+
+          CARD=$(curl -s "https://${FQDN}/api/agent-card")
+          RUNNING_VERSION=$(echo "$CARD" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version',''))")
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            EXPECTED_VERSION="${GITHUB_REF#refs/tags/v}"
+            if [[ "$RUNNING_VERSION" != "$EXPECTED_VERSION" ]]; then
+              echo "Version mismatch: expected ${EXPECTED_VERSION}, got ${RUNNING_VERSION}" >&2
+              exit 1
+            fi
+            echo "Version confirmed: ${RUNNING_VERSION}" >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Reset notebook sync mode to missing
+        run: |
+          az containerapp update \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --set-env-vars "NOTEBOOK_SYNC_MODE=missing" \
+            --output none
+          echo "NOTEBOOK_SYNC_MODE reset to missing" >> $GITHUB_STEP_SUMMARY
+
       - name: Point orchestrator to deployed jupyter FQDN
         run: |
           JUP_FQDN=$(az containerapp show \
@@ -333,9 +369,19 @@ jobs:
             echo "Unable to resolve jupyter FQDN" >&2
             exit 1
           fi
-          az containerapp update \
+          NEW_URL="https://${JUP_FQDN}"
+          CURRENT_SIBLING=$(az containerapp show \
             --name ca-orchestrator-agentic-prod \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
-            --set-env-vars "SIBLING_JUPYTER_NODE_URL=https://${JUP_FQDN}" \
-            --output none
-          echo "Updated orchestrator SIBLING_JUPYTER_NODE_URL=https://${JUP_FQDN}" >> $GITHUB_STEP_SUMMARY
+            --query "properties.template.containers[0].env[?name=='SIBLING_JUPYTER_NODE_URL'].value" \
+            -o tsv)
+          if [[ "$CURRENT_SIBLING" != "$NEW_URL" ]]; then
+            az containerapp update \
+              --name ca-orchestrator-agentic-prod \
+              --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+              --set-env-vars "SIBLING_JUPYTER_NODE_URL=${NEW_URL}" \
+              --output none
+            echo "Updated orchestrator SIBLING_JUPYTER_NODE_URL: ${CURRENT_SIBLING} -> ${NEW_URL}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Orchestrator SIBLING_JUPYTER_NODE_URL unchanged (${NEW_URL}), skipping update" >> $GITHUB_STEP_SUMMARY
+          fi
