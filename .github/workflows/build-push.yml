@@ -95,6 +95,7 @@ jobs:
     needs: build-push
     if: github.repository_owner == 'LabmarketAI' && github.event_name != 'pull_request'
     runs-on: ubuntu-latest
+    environment: prod
     permissions:
       id-token: write
       contents: read
