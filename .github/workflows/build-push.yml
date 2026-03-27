@@ -324,30 +324,30 @@ jobs:
             sleep 10
           done
 
-      - name: Verify jupyter health
+      - name: Verify jupyter deploy
         run: |
-          # Jupyter starts slower than orchestrator — allow extra ramp time
-          sleep 90
-          FQDN=$(az containerapp show \
+          # ca-jupyter-node-agentic-prod has internal ingress — not reachable from
+          # GitHub Actions runners. Verify correctness via ACA env vars instead.
+          DEPLOYED_VERSION=$(az containerapp show \
             --name "${{ env.ACA_APP_NAME }}" \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
-            --query "properties.configuration.ingress.fqdn" -o tsv)
-          HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://${FQDN}/health")
-          if [[ "$HTTP_STATUS" != "200" ]]; then
-            echo "Jupyter health check failed (HTTP $HTTP_STATUS)" >&2
-            exit 1
-          fi
-          echo "Health check passed (HTTP $HTTP_STATUS) — https://${FQDN}" >> $GITHUB_STEP_SUMMARY
+            --query "properties.template.containers[0].env[?name=='AGENT_CARD_VERSION'].value" \
+            -o tsv)
+          DEPLOYED_SYNC_MODE=$(az containerapp show \
+            --name "${{ env.ACA_APP_NAME }}" \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "properties.template.containers[0].env[?name=='NOTEBOOK_SYNC_MODE'].value" \
+            -o tsv)
+          echo "AGENT_CARD_VERSION=${DEPLOYED_VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "NOTEBOOK_SYNC_MODE=${DEPLOYED_SYNC_MODE}" >> $GITHUB_STEP_SUMMARY
 
-          CARD=$(curl -s "https://${FQDN}/api/agent-card")
-          RUNNING_VERSION=$(echo "$CARD" | python3 -c "import json,sys; print(json.load(sys.stdin).get('version',''))")
           if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
             EXPECTED_VERSION="${GITHUB_REF#refs/tags/v}"
-            if [[ "$RUNNING_VERSION" != "$EXPECTED_VERSION" ]]; then
-              echo "Version mismatch: expected ${EXPECTED_VERSION}, got ${RUNNING_VERSION}" >&2
+            if [[ "$DEPLOYED_VERSION" != "$EXPECTED_VERSION" ]]; then
+              echo "Version mismatch: expected ${EXPECTED_VERSION}, got ${DEPLOYED_VERSION}" >&2
               exit 1
             fi
-            echo "Version confirmed: ${RUNNING_VERSION}" >> $GITHUB_STEP_SUMMARY
+            echo "Version confirmed: ${DEPLOYED_VERSION}" >> $GITHUB_STEP_SUMMARY
           fi
 
       - name: Reset notebook sync mode to missing
