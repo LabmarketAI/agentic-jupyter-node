@@ -294,6 +294,35 @@ jobs:
             --output none
           echo "Deployed ${IMAGE} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Verify revision activated
+        run: |
+          EXPECTED_IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
+          for i in $(seq 1 24); do
+            ACTIVE_IMAGE=$(az containerapp show \
+              --name ${{ env.ACA_APP_NAME }} \
+              --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
+              --query "properties.template.containers[0].image" -o tsv)
+            HEALTH=$(az containerapp revision list \
+              --name ${{ env.ACA_APP_NAME }} \
+              --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
+              --query "[?properties.active] | [0].properties.healthState" -o tsv)
+            echo "[$i/24] image=${ACTIVE_IMAGE} health=${HEALTH}"
+            if [[ "$ACTIVE_IMAGE" == "$EXPECTED_IMAGE" && "$HEALTH" == "Healthy" ]]; then
+              echo "Revision active and healthy" >> $GITHUB_STEP_SUMMARY
+              break
+            fi
+            if [[ $i -eq 24 ]]; then
+              echo "Revision did not become healthy after 4 minutes" >&2
+              az containerapp revision list \
+                --name ${{ env.ACA_APP_NAME }} \
+                --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
+                --query "[].{name:name, active:properties.active, health:properties.healthState, image:properties.template.containers[0].image}" \
+                -o table >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
       - name: Point orchestrator to deployed jupyter FQDN
         run: |
           JUP_FQDN=$(az containerapp show \
