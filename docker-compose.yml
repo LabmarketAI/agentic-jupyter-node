@@ -8,6 +8,7 @@ services:
       - NODE_NAME=jupyter-node
       - NODE_TYPE=jupyter
       - NODE_PORT=${JUPYTER_NODE_PORT:-8002}
+      - JUPYTER_NODE_VERSION=${JUPYTER_NODE_VERSION:-0.5.8}
       - JUPYTER_LAB_PORT=${JUPYTER_LAB_PORT:-8888}
       - SIBLING_MODEL_NODE_URL=${SIBLING_MODEL_NODE_URL:-http://model-node:8001}
       - SIBLING_QISKIT_NODE_URL=${SIBLING_QISKIT_NODE_URL:-http://qiskit-node:8003}

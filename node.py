@@ -512,7 +512,12 @@ class JupyterNode(BaseNode):
                 "Calls model-node directly via HTTP for inline LLM inference."
             ),
             url=f"http://{node_name}:{node_port}/rpc",
-            version=os.environ.get("AGENT_CARD_VERSION", "0.5.8"),
+            version=(
+                os.environ.get("AGENT_CARD_VERSION")
+                or os.environ.get("JUPYTER_NODE_VERSION")
+                or os.environ.get("APP_VERSION")
+                or "0.5.8"
+            ),
             skills=[
                 AgentSkill(
                     id="kernel-start",
