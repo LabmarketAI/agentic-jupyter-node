@@ -46,6 +46,51 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Validate notebooks schema
+      run: |
+        python3 - <<'PY'
+        import json
+        import sys
+        from pathlib import Path
+
+        notebooks_dir = Path("notebooks")
+        if not notebooks_dir.is_dir():
+          print("No notebooks directory found; failing build")
+          sys.exit(1)
+
+        required = {"cells", "metadata", "nbformat", "nbformat_minor"}
+        failures = []
+        checked = 0
+
+        for path in sorted(notebooks_dir.glob("*.ipynb")):
+          checked += 1
+          try:
+            with path.open("r", encoding="utf-8") as fh:
+              data = json.load(fh)
+          except Exception as exc:
+            failures.append(f"{path}: invalid JSON ({exc})")
+            continue
+
+          missing = sorted(required - set(data.keys()))
+          if missing:
+            failures.append(f"{path}: missing keys {', '.join(missing)}")
+            continue
+
+          if not isinstance(data.get("cells"), list):
+            failures.append(f"{path}: 'cells' must be a list")
+
+        if checked == 0:
+          failures.append("No .ipynb files found in notebooks/")
+
+        if failures:
+          print("Notebook validation failed:")
+          for item in failures:
+            print(f"- {item}")
+          sys.exit(1)
+
+        print(f"Notebook validation passed for {checked} file(s).")
+        PY
+
       - name: Dependency audit (pip-audit)
         run: |
           pip install pip-audit --quiet
