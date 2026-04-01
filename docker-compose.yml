@@ -13,6 +13,7 @@ services:
       - SIBLING_MODEL_NODE_URL=${SIBLING_MODEL_NODE_URL:-http://model-node:8001}
       - SIBLING_QISKIT_NODE_URL=${SIBLING_QISKIT_NODE_URL:-http://qiskit-node:8003}
       - SIBLING_CHENG_DATASET_NODE_URL=${SIBLING_CHENG_DATASET_NODE_URL:-http://cheng-dataset-node:8004}
+      - SIBLING_CTGOV_DATASET_NODE_URL=${SIBLING_CTGOV_DATASET_NODE_URL:-http://ctgov-dataset-node:8010}
       - CHENG_POSTGRES_DSN=${CHENG_POSTGRES_DSN:-postgresql://cheng:cheng@cheng-postgres:5432/cheng}
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-}
     volumes:

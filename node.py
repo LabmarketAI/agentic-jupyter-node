@@ -919,6 +919,61 @@ class JupyterNode(BaseNode):
                 logger.error("cheng_graph.error", error=str(exc))
                 return JSONResponse({"error": str(exc)}, status_code=502)
 
+        # ── /ctgov/* passthrough — forward to ctgov-dataset-node ───────────
+        @app.api_route("/ctgov", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        async def ctgov_root_proxy(request: Request) -> JSONResponse:
+            """Proxy root ctgov calls to ctgov-dataset-node."""
+            return await _ctgov_proxy(request, "")
+
+        @app.api_route("/ctgov/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        async def ctgov_path_proxy(request: Request, path: str) -> JSONResponse:
+            """Proxy ctgov API calls to ctgov-dataset-node."""
+            return await _ctgov_proxy(request, path)
+
+        async def _ctgov_proxy(request: Request, path: str) -> JSONResponse:
+            ctgov_url = os.environ.get("SIBLING_CTGOV_DATASET_NODE_URL", "").rstrip("/")
+            if not ctgov_url:
+                return JSONResponse({"error": "SIBLING_CTGOV_DATASET_NODE_URL not set"}, status_code=503)
+
+            query = f"?{request.url.query}" if request.url.query else ""
+            suffix = f"/{path}" if path else ""
+            target = f"{ctgov_url}{suffix}{query}"
+
+            hop_headers = {
+                "connection",
+                "transfer-encoding",
+                "te",
+                "trailers",
+                "upgrade",
+                "keep-alive",
+                "proxy-authorization",
+                "proxy-authenticate",
+                "host",
+            }
+            forward_headers = {
+                k: v for k, v in request.headers.items() if k.lower() not in hop_headers
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
+                    resp = await client.request(
+                        method=request.method,
+                        url=target,
+                        headers=forward_headers,
+                        content=await request.body(),
+                    )
+
+                out = Response(content=resp.content, status_code=resp.status_code)
+                for k, v in resp.headers.items():
+                    kl = k.lower()
+                    if kl in hop_headers or kl == "content-length":
+                        continue
+                    out.headers[k] = v
+                return out
+            except Exception as exc:
+                logger.error("ctgov_proxy.error", error=str(exc), target=target)
+                return JSONResponse({"error": str(exc)}, status_code=502)
+
     def register_mcp_tools(self, mcp) -> None:
         @mcp.tool()
         async def start_kernel(name: str) -> dict:
