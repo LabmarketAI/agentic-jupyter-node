@@ -937,7 +937,11 @@ class JupyterNode(BaseNode):
 
             query = f"?{request.url.query}" if request.url.query else ""
             suffix = f"/{path}" if path else ""
-            target = f"{ctgov_url}{suffix}{query}"
+            candidates = [ctgov_url]
+            # In ACA internal networking, sibling URLs sometimes omit the target
+            # port for non-ingress apps. Try :8010 as a safe fallback for ctgov.
+            if ctgov_url.startswith("http://") and ":" not in ctgov_url.removeprefix("http://"):
+                candidates.append(f"{ctgov_url}:8010")
 
             hop_headers = {
                 "connection",
@@ -954,25 +958,38 @@ class JupyterNode(BaseNode):
                 k: v for k, v in request.headers.items() if k.lower() not in hop_headers
             }
 
-            try:
-                async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
-                    resp = await client.request(
-                        method=request.method,
-                        url=target,
-                        headers=forward_headers,
-                        content=await request.body(),
-                    )
+            last_error = None
+            for base in candidates:
+                target = f"{base}{suffix}{query}"
+                try:
+                    async with httpx.AsyncClient(timeout=60.0, follow_redirects=False) as client:
+                        resp = await client.request(
+                            method=request.method,
+                            url=target,
+                            headers=forward_headers,
+                            content=await request.body(),
+                        )
 
-                out = Response(content=resp.content, status_code=resp.status_code)
-                for k, v in resp.headers.items():
-                    kl = k.lower()
-                    if kl in hop_headers or kl == "content-length":
+                    # If the first candidate lands on an unroutable endpoint,
+                    # allow fallback to the next candidate.
+                    if resp.status_code == 404 and base != candidates[-1]:
                         continue
-                    out.headers[k] = v
-                return out
-            except Exception as exc:
-                logger.error("ctgov_proxy.error", error=str(exc), target=target)
-                return JSONResponse({"error": str(exc)}, status_code=502)
+
+                    out = Response(content=resp.content, status_code=resp.status_code)
+                    for k, v in resp.headers.items():
+                        kl = k.lower()
+                        if kl in hop_headers or kl == "content-length":
+                            continue
+                        out.headers[k] = v
+                    return out
+                except Exception as exc:
+                    last_error = str(exc)
+                    continue
+
+            if last_error:
+                logger.error("ctgov_proxy.error", error=last_error, candidates=candidates)
+                return JSONResponse({"error": last_error}, status_code=502)
+            return JSONResponse({"error": "ctgov upstream not reachable"}, status_code=502)
 
     def register_mcp_tools(self, mcp) -> None:
         @mcp.tool()
