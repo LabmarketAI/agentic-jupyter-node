@@ -16,6 +16,8 @@ services:
       - SIBLING_CTGOV_DATASET_NODE_URL=${SIBLING_CTGOV_DATASET_NODE_URL:-http://ctgov-dataset-node:8010}
       - CHENG_POSTGRES_DSN=${CHENG_POSTGRES_DSN:-postgresql://cheng:cheng@cheng-postgres:5432/cheng}
       - ORCHESTRATOR_URL=${ORCHESTRATOR_URL:-}
+      - NOTEBOOK_SYNC_MODE=${NOTEBOOK_SYNC_MODE:-reconcile}
+      - NOTEBOOK_SYNC_VERSION=${NOTEBOOK_SYNC_VERSION:-local-dev}
     volumes:
       # Notebooks and user work persist on the host at ./workspace and are
       # never committed to git (see .gitignore). The directory is created

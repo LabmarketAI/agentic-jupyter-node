@@ -16,6 +16,7 @@ Communication layers used:
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import inspect
 import json
 import os
@@ -23,6 +24,7 @@ import re
 import shutil
 import sys
 import structlog
+import time
 from contextlib import asynccontextmanager
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -52,48 +54,162 @@ from starlette.websockets import WebSocket
 logger = structlog.get_logger()
 
 
-def _sync_template_notebooks() -> None:
-    """Copy bundled notebooks into runtime workspace targets."""
-    mode = os.environ.get("NOTEBOOK_SYNC_MODE", "missing").strip().lower()
-    overwrite = mode == "overwrite"
+def _file_sha256(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _load_sync_state(path: Path) -> dict[str, Any]:
+    if not path.exists():
+        return {"files": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except Exception:
+        pass
+    return {"files": {}}
+
+
+def _save_sync_state(path: Path, data: dict[str, Any]) -> None:
+    path.write_text(json.dumps(data, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
+
+
+def _sync_template_notebooks() -> dict[str, Any]:
+    """Reconcile bundled notebooks into workspace mounts.
+
+    Modes (NOTEBOOK_SYNC_MODE):
+    - missing: only add missing files.
+    - overwrite: always replace destination files.
+    - reconcile (default): update stale files, preserve user-edited files, and
+      write <name>.upstream.ipynb when upstream changed.
+    """
+    mode = os.environ.get("NOTEBOOK_SYNC_MODE", "reconcile").strip().lower()
+    if mode not in {"missing", "overwrite", "reconcile"}:
+        mode = "reconcile"
+
+    sync_version = os.environ.get("NOTEBOOK_SYNC_VERSION", "unknown")
+    state_file_name = os.environ.get("NOTEBOOK_SYNC_STATE_FILE", ".agentic-notebook-sync.json")
+
     source_dir = Path("/app/notebooks")
     if not source_dir.exists():
         logger.warning("notebook.sync.source_missing", source=str(source_dir))
-        return
+        return {
+            "mode": mode,
+            "version": sync_version,
+            "copied": 0,
+            "skipped": 0,
+            "conflicts": 0,
+            "failed": 0,
+            "state_files": [],
+        }
 
     workspace = Path(os.environ.get("JUPYTER_ROOT_DIR", "/workspace"))
     targets = [workspace, workspace / "notebooks", Path("/notebooks")]
 
     copied = 0
     skipped = 0
+    conflicts = 0
     failed = 0
-    for nb in sorted(source_dir.glob("*.ipynb")):
-        for target_dir in targets:
-            try:
-                target_dir.mkdir(parents=True, exist_ok=True)
+    state_files: list[str] = []
+
+    for target_dir in targets:
+        try:
+            target_dir.mkdir(parents=True, exist_ok=True)
+            state_path = target_dir / state_file_name
+            state = _load_sync_state(state_path)
+            tracked = state.get("files", {}) if isinstance(state.get("files"), dict) else {}
+
+            for nb in sorted(source_dir.glob("*.ipynb")):
                 dest = target_dir / nb.name
-                if overwrite or not dest.exists():
+                src_hash = _file_sha256(nb)
+                prev = tracked.get(nb.name, {}) if isinstance(tracked.get(nb.name), dict) else {}
+                prev_src_hash = prev.get("source_hash")
+
+                should_copy = False
+                should_shadow = False
+
+                if mode == "overwrite":
+                    should_copy = True
+                elif not dest.exists():
+                    should_copy = True
+                elif mode == "missing":
+                    should_copy = False
+                else:
+                    dest_hash = _file_sha256(dest)
+                    if dest_hash == src_hash:
+                        should_copy = False
+                    elif prev_src_hash and dest_hash == prev_src_hash:
+                        # Safe stale update: user did not modify dest since last sync.
+                        should_copy = True
+                    else:
+                        # Preserve user edits and expose new upstream copy.
+                        should_shadow = True
+
+                if should_copy:
                     shutil.copy2(nb, dest)
                     copied += 1
+                elif should_shadow:
+                    shadow = target_dir / f"{nb.stem}.upstream{nb.suffix}"
+                    shutil.copy2(nb, shadow)
+                    conflicts += 1
+                    logger.warning(
+                        "notebook.sync.conflict_preserved",
+                        destination=str(dest),
+                        upstream_shadow=str(shadow),
+                        mode=mode,
+                    )
                 else:
                     skipped += 1
-            except Exception as exc:
-                failed += 1
-                logger.warning(
-                    "notebook.sync.copy_failed",
-                    source=str(nb),
-                    destination=str(target_dir),
-                    error=str(exc),
-                )
+
+                tracked[nb.name] = {
+                    "source_hash": src_hash,
+                    "sync_version": sync_version,
+                    "synced_at": int(time.time()),
+                    "mode": mode,
+                }
+
+            state["files"] = tracked
+            state["meta"] = {
+                "mode": mode,
+                "sync_version": sync_version,
+                "source": str(source_dir),
+                "updated_at": int(time.time()),
+            }
+            _save_sync_state(state_path, state)
+            state_files.append(str(state_path))
+        except Exception as exc:
+            failed += 1
+            logger.warning(
+                "notebook.sync.target_failed",
+                destination=str(target_dir),
+                error=str(exc),
+            )
 
     logger.info(
         "notebook.sync.completed",
         mode=mode,
+        version=sync_version,
         copied=copied,
         skipped=skipped,
+        conflicts=conflicts,
         failed=failed,
         workspace=str(workspace),
+        state_files=state_files,
     )
+    return {
+        "mode": mode,
+        "version": sync_version,
+        "copied": copied,
+        "skipped": skipped,
+        "conflicts": conflicts,
+        "failed": failed,
+        "workspace": str(workspace),
+        "state_files": state_files,
+    }
 
 # ── Bearer token auth middleware ──────────────────────────────────────────────
 
@@ -582,7 +698,7 @@ class JupyterNode(BaseNode):
         @asynccontextmanager
         async def _lifespan_with_lab(fastapi_app):
             workspace = os.environ.get("JUPYTER_ROOT_DIR", "/workspace")
-            _sync_template_notebooks()
+            fastapi_app.state.notebook_sync_status = _sync_template_notebooks()
             cmd = [
                 sys.executable, "-m", "jupyterlab",
                 "--ip=0.0.0.0",
@@ -685,6 +801,10 @@ class JupyterNode(BaseNode):
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy_root(request: Request) -> Response:
             return await _lab_http(request, "")
+
+        @app.get("/notebooks/sync-status")
+        async def notebook_sync_status() -> JSONResponse:
+            return JSONResponse(getattr(app.state, "notebook_sync_status", {}))
 
         @app.api_route("/jupyter/lab/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy(request: Request, path: str) -> Response:
