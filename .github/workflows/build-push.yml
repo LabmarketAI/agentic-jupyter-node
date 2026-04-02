@@ -395,6 +395,28 @@ jobs:
             echo "Version confirmed: ${DEPLOYED_VERSION}" >> $GITHUB_STEP_SUMMARY
           fi
 
+      - name: Verify examples notebook content
+        run: |
+          CHECK_CMD='python -c "import json,sys; nb=json.load(open(\"/workspace/examples/ttd_demo.ipynb\", \"r\", encoding=\"utf-8\")); req={\"cells\",\"metadata\",\"nbformat\",\"nbformat_minor\"}; missing=sorted(req-set(nb)); marker=any(\"pandas_sql\" in \"\".join(c.get(\"source\",[])) for c in nb.get(\"cells\",[])); print(\"missing_keys=\" + (\",\".join(missing) if missing else \"none\")); print(\"has_pandas_marker=\" + str(marker)); sys.exit(0 if (not missing and marker) else 2)"'
+          ok=0
+          for attempt in 1 2 3; do
+            echo "Notebook verification attempt ${attempt}/3"
+            if az containerapp exec \
+              --name "${{ env.ACA_APP_NAME }}" \
+              --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+              --command "$CHECK_CMD"; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ "$ok" -ne 1 ]]; then
+            echo "examples/ttd_demo.ipynb failed validation in running container" >&2
+            exit 1
+          fi
+          echo "examples/ttd_demo.ipynb validation passed" >> $GITHUB_STEP_SUMMARY
+
       - name: Reset notebook sync mode to missing
         run: |
           az containerapp update \
