@@ -108,7 +108,24 @@ def _sync_template_notebooks() -> dict[str, Any]:
         }
 
     workspace = Path(os.environ.get("JUPYTER_ROOT_DIR", "/workspace"))
-    targets = [workspace, workspace / "notebooks", Path("/notebooks")]
+
+    # Keep preloaded notebooks out of the Jupyter root itself to avoid
+    # cluttering the top-level file browser. By default we sync into
+    # "notebooks" under the root; callers can override with
+    # NOTEBOOK_SYNC_TARGET_DIRS (comma-separated, relative or absolute paths).
+    raw_targets = os.environ.get("NOTEBOOK_SYNC_TARGET_DIRS", "").strip()
+    if raw_targets:
+        targets: list[Path] = []
+        for raw in raw_targets.split(","):
+            name = raw.strip()
+            if not name:
+                continue
+            p = Path(name)
+            targets.append(p if p.is_absolute() else workspace / p)
+        if not targets:
+            targets = [workspace / "notebooks"]
+    else:
+        targets = [workspace / "notebooks"]
 
     copied = 0
     skipped = 0
