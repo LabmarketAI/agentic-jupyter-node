@@ -81,11 +81,18 @@ def _save_sync_state(path: Path, data: dict[str, Any]) -> None:
 def _sync_template_notebooks() -> dict[str, Any]:
     """Reconcile bundled notebooks into workspace mounts.
 
-    Modes (NOTEBOOK_SYNC_MODE):
+        Modes (NOTEBOOK_SYNC_MODE):
     - missing: only add missing files.
     - overwrite: always replace destination files.
     - reconcile (default): update stale files, preserve user-edited files, and
       write <name>.upstream.ipynb when upstream changed.
+
+        Folder policies:
+        - NOTEBOOK_SYNC_TARGET_POLICIES can define per-folder modes using
+            comma-separated entries like "examples:overwrite,notebooks:reconcile".
+        - If NOTEBOOK_SYNC_TARGET_POLICIES is unset, NOTEBOOK_SYNC_TARGET_DIRS plus
+            NOTEBOOK_SYNC_MODE are used as global fallback behavior.
+        - Default behavior when unset: examples=overwrite, notebooks=reconcile.
     """
     mode = os.environ.get("NOTEBOOK_SYNC_MODE", "reconcile").strip().lower()
     if mode not in {"missing", "overwrite", "reconcile"}:
@@ -110,22 +117,59 @@ def _sync_template_notebooks() -> dict[str, Any]:
     workspace = Path(os.environ.get("JUPYTER_ROOT_DIR", "/workspace"))
 
     # Keep preloaded notebooks out of the Jupyter root itself to avoid
-    # cluttering the top-level file browser. By default we sync into
-    # "notebooks" under the root; callers can override with
-    # NOTEBOOK_SYNC_TARGET_DIRS (comma-separated, relative or absolute paths).
-    raw_targets = os.environ.get("NOTEBOOK_SYNC_TARGET_DIRS", "").strip()
-    if raw_targets:
-        targets: list[Path] = []
-        for raw in raw_targets.split(","):
-            name = raw.strip()
+    # cluttering the top-level file browser.
+    #
+    # Preferred config (per-target):
+    #   NOTEBOOK_SYNC_TARGET_POLICIES="examples:overwrite,notebooks:reconcile"
+    #
+    # Backward-compatible config (global mode):
+    #   NOTEBOOK_SYNC_TARGET_DIRS="notebooks"
+    #   NOTEBOOK_SYNC_MODE="reconcile"
+    raw_policies = os.environ.get("NOTEBOOK_SYNC_TARGET_POLICIES", "").strip()
+    if raw_policies:
+        target_policies: list[tuple[Path, str]] = []
+        for raw in raw_policies.split(","):
+            item = raw.strip()
+            if not item:
+                continue
+            if ":" in item:
+                name, target_mode = item.split(":", 1)
+            else:
+                name, target_mode = item, mode
+            name = name.strip()
+            target_mode = target_mode.strip().lower()
+            if target_mode not in {"missing", "overwrite", "reconcile"}:
+                target_mode = mode
             if not name:
                 continue
             p = Path(name)
-            targets.append(p if p.is_absolute() else workspace / p)
-        if not targets:
-            targets = [workspace / "notebooks"]
+            target_dir = p if p.is_absolute() else workspace / p
+            target_policies.append((target_dir, target_mode))
+        if not target_policies:
+            target_policies = [
+                (workspace / "examples", "overwrite"),
+                (workspace / "notebooks", "reconcile"),
+            ]
     else:
-        targets = [workspace / "notebooks"]
+        raw_targets = os.environ.get("NOTEBOOK_SYNC_TARGET_DIRS", "").strip()
+        if raw_targets:
+            target_policies = []
+            for raw in raw_targets.split(","):
+                name = raw.strip()
+                if not name:
+                    continue
+                p = Path(name)
+                target_policies.append((p if p.is_absolute() else workspace / p, mode))
+            if not target_policies:
+                target_policies = [
+                    (workspace / "examples", "overwrite"),
+                    (workspace / "notebooks", "reconcile"),
+                ]
+        else:
+            target_policies = [
+                (workspace / "examples", "overwrite"),
+                (workspace / "notebooks", "reconcile"),
+            ]
 
     copied = 0
     skipped = 0
@@ -133,7 +177,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
     failed = 0
     state_files: list[str] = []
 
-    for target_dir in targets:
+    for target_dir, target_mode in target_policies:
         try:
             target_dir.mkdir(parents=True, exist_ok=True)
             state_path = target_dir / state_file_name
@@ -149,11 +193,11 @@ def _sync_template_notebooks() -> dict[str, Any]:
                 should_copy = False
                 should_shadow = False
 
-                if mode == "overwrite":
+                if target_mode == "overwrite":
                     should_copy = True
                 elif not dest.exists():
                     should_copy = True
-                elif mode == "missing":
+                elif target_mode == "missing":
                     should_copy = False
                 else:
                     dest_hash = _file_sha256(dest)
@@ -177,7 +221,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
                         "notebook.sync.conflict_preserved",
                         destination=str(dest),
                         upstream_shadow=str(shadow),
-                        mode=mode,
+                        mode=target_mode,
                     )
                 else:
                     skipped += 1
@@ -186,12 +230,12 @@ def _sync_template_notebooks() -> dict[str, Any]:
                     "source_hash": src_hash,
                     "sync_version": sync_version,
                     "synced_at": int(time.time()),
-                    "mode": mode,
+                    "mode": target_mode,
                 }
 
             state["files"] = tracked
             state["meta"] = {
-                "mode": mode,
+                "mode": target_mode,
                 "sync_version": sync_version,
                 "source": str(source_dir),
                 "updated_at": int(time.time()),
@@ -210,6 +254,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
         "notebook.sync.completed",
         mode=mode,
         version=sync_version,
+        target_policies=[{"target": str(t), "mode": m} for t, m in target_policies],
         copied=copied,
         skipped=skipped,
         conflicts=conflicts,
@@ -220,6 +265,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
     return {
         "mode": mode,
         "version": sync_version,
+        "target_policies": [{"target": str(t), "mode": m} for t, m in target_policies],
         "copied": copied,
         "skipped": skipped,
         "conflicts": conflicts,
