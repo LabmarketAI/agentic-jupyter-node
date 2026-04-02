@@ -757,7 +757,7 @@ class JupyterNode(BaseNode):
                     AgentExtension(
                         uri="jupyter-lab",
                         description="JupyterLab web UI",
-                        params={"url": "/jupyter/lab"},
+                        params={"url": "/jupyter/lab/tree"},
                     )
                 ]
             ),
@@ -798,6 +798,7 @@ class JupyterNode(BaseNode):
                 "--ServerApp.disable_check_xsrf=True",
                 "--ServerApp.iopub_data_rate_limit=0",
                 "--ServerApp.base_url=/jupyter/lab",
+                "--ServerApp.default_url=/tree",
                 f"--ServerApp.root_dir={workspace}",
             ]
             proc = await asyncio.create_subprocess_exec(*cmd)
