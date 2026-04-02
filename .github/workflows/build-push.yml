@@ -91,6 +91,15 @@ jobs:
           print(f"Notebook validation passed for {checked} file(s).")
           PY
 
+      - name: Install notebook linter
+        run: |
+          python3 -m pip install --quiet nbqa ruff
+
+      - name: Lint notebook Python syntax
+        run: |
+          # Keep lint scope narrow to catch broken notebook code without enforcing style.
+          nbqa ruff --select E9,F63,F7 notebooks/*.ipynb
+
       - name: Dependency audit (pip-audit)
         run: |
           pip install pip-audit --quiet
