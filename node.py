@@ -89,10 +89,10 @@ def _sync_template_notebooks() -> dict[str, Any]:
 
         Folder policies:
         - NOTEBOOK_SYNC_TARGET_POLICIES can define per-folder modes using
-            comma-separated entries like "examples:overwrite,notebooks:reconcile".
+            comma-separated entries like "examples:overwrite,notebooks:disabled".
         - If NOTEBOOK_SYNC_TARGET_POLICIES is unset, NOTEBOOK_SYNC_TARGET_DIRS plus
             NOTEBOOK_SYNC_MODE are used as global fallback behavior.
-        - Default behavior when unset: examples=overwrite, notebooks=reconcile.
+        - Default behavior when unset: examples=overwrite, notebooks=disabled.
     """
     mode = os.environ.get("NOTEBOOK_SYNC_MODE", "reconcile").strip().lower()
     if mode not in {"missing", "overwrite", "reconcile"}:
@@ -120,7 +120,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
     # cluttering the top-level file browser.
     #
     # Preferred config (per-target):
-    #   NOTEBOOK_SYNC_TARGET_POLICIES="examples:overwrite,notebooks:reconcile"
+    #   NOTEBOOK_SYNC_TARGET_POLICIES="examples:overwrite,notebooks:disabled"
     #
     # Backward-compatible config (global mode):
     #   NOTEBOOK_SYNC_TARGET_DIRS="notebooks"
@@ -138,7 +138,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
                 name, target_mode = item, mode
             name = name.strip()
             target_mode = target_mode.strip().lower()
-            if target_mode not in {"missing", "overwrite", "reconcile"}:
+            if target_mode not in {"missing", "overwrite", "reconcile", "disabled"}:
                 target_mode = mode
             if not name:
                 continue
@@ -148,7 +148,7 @@ def _sync_template_notebooks() -> dict[str, Any]:
         if not target_policies:
             target_policies = [
                 (workspace / "examples", "overwrite"),
-                (workspace / "notebooks", "reconcile"),
+                (workspace / "notebooks", "disabled"),
             ]
     else:
         raw_targets = os.environ.get("NOTEBOOK_SYNC_TARGET_DIRS", "").strip()
@@ -163,12 +163,12 @@ def _sync_template_notebooks() -> dict[str, Any]:
             if not target_policies:
                 target_policies = [
                     (workspace / "examples", "overwrite"),
-                    (workspace / "notebooks", "reconcile"),
+                    (workspace / "notebooks", "disabled"),
                 ]
         else:
             target_policies = [
                 (workspace / "examples", "overwrite"),
-                (workspace / "notebooks", "reconcile"),
+                (workspace / "notebooks", "disabled"),
             ]
 
     copied = 0
@@ -193,7 +193,9 @@ def _sync_template_notebooks() -> dict[str, Any]:
                 should_copy = False
                 should_shadow = False
 
-                if target_mode == "overwrite":
+                if target_mode == "disabled":
+                    should_copy = False
+                elif target_mode == "overwrite":
                     should_copy = True
                 elif not dest.exists():
                     should_copy = True
