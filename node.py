@@ -797,8 +797,8 @@ class JupyterNode(BaseNode):
                 "--ServerApp.allow_origin=*",
                 "--ServerApp.disable_check_xsrf=True",
                 "--ServerApp.iopub_data_rate_limit=0",
-                "--ServerApp.base_url=/jupyter/lab",
-                "--ServerApp.default_url=/tree",
+                "--ServerApp.base_url=/jupyter",
+                "--ServerApp.default_url=/lab/tree",
                 f"--ServerApp.root_dir={workspace}",
             ]
             proc = await asyncio.create_subprocess_exec(*cmd)
@@ -820,7 +820,7 @@ class JupyterNode(BaseNode):
 
         # ── JupyterLab reverse proxy (/jupyter/lab → localhost:8888) ──────────
         # JupyterLab runs on port 8888 inside the container with
-        # --ServerApp.base_url=/jupyter/lab.  All HTTP and WebSocket traffic
+        # --ServerApp.base_url=/jupyter.  All HTTP and WebSocket traffic
         # from the orchestrator is forwarded here transparently.
 
         _HOP_HEADERS = frozenset({
@@ -847,8 +847,8 @@ class JupyterNode(BaseNode):
             # JupyterLab never sees the public ACA hostname and can't embed it
             # in redirect Location headers.
             # follow_redirects=False: let redirect responses pass through to
-            # the browser so it updates its URL bar correctly (e.g. /jupyter/lab
-            # → /jupyter/lab/lab).  We rewrite the Location header from the
+            # the browser so it updates its URL bar correctly. We rewrite the
+            # Location header from the
             # internal localhost URL back to the proxy-relative path so the
             # browser follows the redirect through the orchestrator proxy.
             fwd = {k: v for k, v in request.headers.items()
