@@ -78,6 +78,28 @@ def _save_sync_state(path: Path, data: dict[str, Any]) -> None:
     path.write_text(json.dumps(data, ensure_ascii=True, indent=2) + "\n", encoding="utf-8")
 
 
+def _warn_preloaded_in_user_notebooks(workspace: Path) -> None:
+    """Warn when bundled example notebook names are present in user folder."""
+    source_dir = Path("/app/notebooks")
+    user_dir = workspace / "notebooks"
+    if not source_dir.exists() or not user_dir.exists():
+        return
+
+    try:
+        source_names = {p.name for p in source_dir.glob("*.ipynb")}
+        user_names = {p.name for p in user_dir.glob("*.ipynb")}
+        overlap = sorted(source_names & user_names)
+        if overlap:
+            logger.warning(
+                "notebook.guard.preloaded_in_user_folder",
+                user_folder=str(user_dir),
+                overlap_count=len(overlap),
+                overlap_names=overlap,
+            )
+    except Exception as exc:
+        logger.warning("notebook.guard.check_failed", error=str(exc), user_folder=str(user_dir))
+
+
 def _sync_template_notebooks() -> dict[str, Any]:
     """Reconcile bundled notebooks into workspace mounts.
 
@@ -764,6 +786,7 @@ class JupyterNode(BaseNode):
         async def _lifespan_with_lab(fastapi_app):
             workspace = os.environ.get("JUPYTER_ROOT_DIR", "/workspace")
             fastapi_app.state.notebook_sync_status = _sync_template_notebooks()
+            _warn_preloaded_in_user_notebooks(Path(workspace))
             cmd = [
                 sys.executable, "-m", "jupyterlab",
                 "--ip=0.0.0.0",
