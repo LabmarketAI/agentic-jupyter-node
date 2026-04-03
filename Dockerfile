@@ -22,7 +22,11 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 RUN playwright install --with-deps chromium
 
 # App code — copied last so routine code edits don't invalidate any layer above
-COPY . /app/
+COPY --chown=appuser:appuser . /app/
+
+RUN chown -R appuser:appuser /app
+
+USER appuser
 
 ENV NODE_CLASS=node.JupyterNode
 ENV NODE_TYPE=jupyter
