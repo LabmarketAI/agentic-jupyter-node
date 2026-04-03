@@ -135,10 +135,27 @@ jobs:
             echo "push_tags=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:latest,${SHA_TAG}" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Resolve base image reference
+        id: base_image
+        run: |
+          BASE_IMAGE="${{ vars.NODE_BASE_IMAGE_REF }}"
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            if [[ -z "$BASE_IMAGE" || "$BASE_IMAGE" != *"@sha256:"* ]]; then
+              echo "NODE_BASE_IMAGE_REF must be set to a digest-pinned reference for release tag builds." >&2
+              exit 1
+            fi
+          fi
+          if [[ -z "$BASE_IMAGE" ]]; then
+            BASE_IMAGE="ghcr.io/labmarketai/agentic-node-base:latest"
+          fi
+          echo "value=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
+
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
+          build-args: |
+            BASE_IMAGE=${{ steps.base_image.outputs.value }}
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.tags.outputs.push_tags }}
           cache-from: type=registry,ref=${{ env.ACR_LOGIN_SERVER }}/${{ env.IMAGE_NAME }}:buildcache
