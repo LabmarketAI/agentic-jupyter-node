@@ -32,4 +32,6 @@ ENV NODE_CLASS=node.JupyterNode
 ENV NODE_TYPE=jupyter
 ENV JUPYTER_LAB_PORT=8888
 
+USER appuser
+
 CMD ["sh", "/app/start.sh"]
