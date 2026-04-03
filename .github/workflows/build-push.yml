@@ -259,6 +259,17 @@ jobs:
             exit 1
           fi
 
+          CHENG_FQDN=$(az containerapp show \
+            --name ca-cheng-agentic-prod \
+            --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+            --query "properties.configuration.ingress.fqdn" -o tsv)
+
+          if [[ -z "$CHENG_FQDN" ]]; then
+            echo "Unable to resolve Cheng dataset node FQDN" >&2
+            exit 1
+          fi
+          export SIBLING_CHENG_DATASET_NODE_URL="https://${CHENG_FQDN}"
+
           STORAGE_KEY=$(az storage account keys list \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
             --account-name "$STORAGE_ACCOUNT" \
@@ -271,15 +282,23 @@ jobs:
             --quota 100 \
             --output none || true
 
-          az containerapp env storage set \
+          if az containerapp env storage show \
             --name "${{ env.ACA_ENV_NAME }}" \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
             --storage-name jupyter-workspace \
-            --azure-file-account-name "$STORAGE_ACCOUNT" \
-            --azure-file-account-key "$STORAGE_KEY" \
-            --azure-file-share-name jupyter-workspace \
-            --access-mode ReadWrite \
-            --output none
+            --output none 2>/dev/null; then
+            echo "Managed environment storage jupyter-workspace already exists; skipping immutable field update" >> $GITHUB_STEP_SUMMARY
+          else
+            az containerapp env storage set \
+              --name "${{ env.ACA_ENV_NAME }}" \
+              --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+              --storage-name jupyter-workspace \
+              --azure-file-account-name "$STORAGE_ACCOUNT" \
+              --azure-file-account-key "$STORAGE_KEY" \
+              --azure-file-share-name jupyter-workspace \
+              --access-mode ReadWrite \
+              --output none
+          fi
 
           az containerapp show \
             --name ${{ env.ACA_APP_NAME }} \
@@ -338,6 +357,19 @@ jobs:
               break
           if not found_notebook_sync_mode:
             env.append({'name': 'NOTEBOOK_SYNC_MODE', 'value': 'overwrite'})
+
+          found_cheng_url = False
+          for item in env:
+            if item.get('name') == 'SIBLING_CHENG_DATASET_NODE_URL':
+              item['value'] = os.environ['SIBLING_CHENG_DATASET_NODE_URL']
+              item.pop('secretRef', None)
+              found_cheng_url = True
+              break
+          if not found_cheng_url:
+            env.append({
+              'name': 'SIBLING_CHENG_DATASET_NODE_URL',
+              'value': os.environ['SIBLING_CHENG_DATASET_NODE_URL']
+            })
 
           volumes = template.get('volumes') or []
           template['volumes'] = volumes
