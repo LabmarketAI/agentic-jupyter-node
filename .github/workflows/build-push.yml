@@ -282,15 +282,23 @@ jobs:
             --quota 100 \
             --output none || true
 
-          az containerapp env storage set \
+          if az containerapp env storage show \
             --name "${{ env.ACA_ENV_NAME }}" \
             --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
             --storage-name jupyter-workspace \
-            --azure-file-account-name "$STORAGE_ACCOUNT" \
-            --azure-file-account-key "$STORAGE_KEY" \
-            --azure-file-share-name jupyter-workspace \
-            --access-mode ReadWrite \
-            --output none
+            --output none 2>/dev/null; then
+            echo "Managed environment storage jupyter-workspace already exists; skipping immutable field update" >> $GITHUB_STEP_SUMMARY
+          else
+            az containerapp env storage set \
+              --name "${{ env.ACA_ENV_NAME }}" \
+              --resource-group "${{ env.ACA_RESOURCE_GROUP }}" \
+              --storage-name jupyter-workspace \
+              --azure-file-account-name "$STORAGE_ACCOUNT" \
+              --azure-file-account-key "$STORAGE_KEY" \
+              --azure-file-share-name jupyter-workspace \
+              --access-mode ReadWrite \
+              --output none
+          fi
 
           az containerapp show \
             --name ${{ env.ACA_APP_NAME }} \
