@@ -818,9 +818,9 @@ class JupyterNode(BaseNode):
 
         app.router.lifespan_context = _lifespan_with_lab
 
-        # ── JupyterLab reverse proxy (/jupyter/lab → localhost:8888) ──────────
+        # ── Jupyter reverse proxy (/jupyter/* → localhost:8888/jupyter/*) ─────
         # JupyterLab runs on port 8888 inside the container with
-        # --ServerApp.base_url=/jupyter.  All HTTP and WebSocket traffic
+        # --ServerApp.base_url=/jupyter. All HTTP and WebSocket traffic
         # from the orchestrator is forwarded here transparently.
 
         _HOP_HEADERS = frozenset({
@@ -834,11 +834,11 @@ class JupyterNode(BaseNode):
             "origin", "referer",
         }
 
-        _LOCALHOST_LAB = f"http://localhost:{lab_port}/jupyter/lab"
+        _LOCALHOST_JUPYTER = f"http://localhost:{lab_port}/jupyter"
 
-        async def _lab_http(request: Request, path: str) -> Response:
+        async def _jupyter_http(request: Request, path: str) -> Response:
             qs = str(request.query_params)
-            target = _LOCALHOST_LAB
+            target = _LOCALHOST_JUPYTER
             if path:
                 target += f"/{path}"
             if qs:
@@ -880,7 +880,7 @@ class JupyterNode(BaseNode):
                 if kl in _HOP_HEADERS or kl == "content-length":
                     continue
                 if kl == "location":
-                    v = v.replace(_LOCALHOST_LAB, "/jupyter/lab")
+                    v = v.replace(_LOCALHOST_JUPYTER, "/jupyter")
                 if kl == "set-cookie":
                     out.headers.append(k, v)
                 else:
@@ -889,7 +889,7 @@ class JupyterNode(BaseNode):
 
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy_root(request: Request) -> Response:
-            return await _lab_http(request, "")
+            return await _jupyter_http(request, "lab")
 
         @app.get("/notebooks/sync-status")
         async def notebook_sync_status() -> JSONResponse:
@@ -897,12 +897,16 @@ class JupyterNode(BaseNode):
 
         @app.api_route("/jupyter/lab/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy(request: Request, path: str) -> Response:
-            return await _lab_http(request, path)
+            return await _jupyter_http(request, f"lab/{path}")
 
-        @app.websocket("/jupyter/lab/{path:path}")
-        async def lab_ws_proxy(websocket: WebSocket, path: str) -> None:
+        @app.api_route("/jupyter/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
+        async def jupyter_proxy(request: Request, path: str) -> Response:
+            return await _jupyter_http(request, path)
+
+        @app.websocket("/jupyter/{path:path}")
+        async def jupyter_ws_proxy(websocket: WebSocket, path: str) -> None:
             qs = str(websocket.query_params)
-            target = f"ws://localhost:{lab_port}/jupyter/lab/{path}"
+            target = f"ws://localhost:{lab_port}/jupyter/{path}"
             if qs:
                 target += f"?{qs}"
             skip = {"host", "connection", "upgrade", "sec-websocket-key",
