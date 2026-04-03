@@ -887,6 +887,10 @@ class JupyterNode(BaseNode):
                     out.headers[k] = v
             return out
 
+        # Workspace API — group-owned folders with file isolation
+        from workspace_router import router as workspace_router
+        app.include_router(workspace_router)
+
         @app.api_route("/jupyter/lab", methods=["GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"])
         async def lab_proxy_root(request: Request) -> Response:
             return await _jupyter_http(request, "lab")
