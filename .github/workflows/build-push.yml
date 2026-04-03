@@ -42,6 +42,7 @@ jobs:
     outputs:
       sha_tag: ${{ steps.tags.outputs.sha_tag }}
       version_tag: ${{ steps.tags.outputs.version_tag }}
+      image_digest: ${{ steps.build_push.outputs.digest }}
 
     steps:
       - uses: actions/checkout@v4
@@ -151,6 +152,7 @@ jobs:
           echo "value=${BASE_IMAGE}" >> "$GITHUB_OUTPUT"
 
       - name: Build and push
+        id: build_push
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -366,25 +368,78 @@ jobs:
             --output none
           echo "Deployed ${IMAGE} to ${{ env.ACA_APP_NAME }}" >> $GITHUB_STEP_SUMMARY
 
+      - name: Resolve expected deploy digest
+        id: expected_digest
+        run: |
+          set -euo pipefail
+
+          EXPECTED_DIGEST="${{ needs.build-push.outputs.image_digest }}"
+          EXPECTED_IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
+
+          if [[ "$EXPECTED_DIGEST" != sha256:* ]]; then
+            IMAGE_PATH="${EXPECTED_IMAGE#${{ env.ACR_LOGIN_SERVER }}/}"
+            EXPECTED_DIGEST=$(az acr manifest show-metadata \
+              --registry "${{ env.ACR_NAME }}" \
+              --name "$IMAGE_PATH" \
+              --query digest -o tsv 2>/dev/null || true)
+          fi
+
+          if [[ "$EXPECTED_DIGEST" != sha256:* ]]; then
+            echo "Failed to resolve expected digest for ${EXPECTED_IMAGE}" >&2
+            exit 1
+          fi
+
+          echo "value=${EXPECTED_DIGEST}" >> "$GITHUB_OUTPUT"
+          {
+            echo "expected_image=${EXPECTED_IMAGE}"
+            echo "expected_digest=${EXPECTED_DIGEST}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Verify revision activated
         run: |
+          set -euo pipefail
+          resolve_acr_digest() {
+            local image_ref="$1"
+            if [[ "$image_ref" == *@sha256:* ]]; then
+              echo "${image_ref##*@}"
+              return 0
+            fi
+
+            local image_path="${image_ref#${{ env.ACR_LOGIN_SERVER }}/}"
+            az acr manifest show-metadata \
+              --registry "${{ env.ACR_NAME }}" \
+              --name "$image_path" \
+              --query digest -o tsv 2>/dev/null || true
+          }
+
           EXPECTED_IMAGE="${{ needs.build-push.outputs.version_tag || needs.build-push.outputs.sha_tag }}"
+          EXPECTED_DIGEST="${{ steps.expected_digest.outputs.value }}"
           for i in $(seq 1 24); do
             ACTIVE_IMAGE=$(az containerapp show \
               --name ${{ env.ACA_APP_NAME }} \
               --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
               --query "properties.template.containers[0].image" -o tsv)
+            ACTIVE_DIGEST=$(resolve_acr_digest "$ACTIVE_IMAGE")
             HEALTH=$(az containerapp revision list \
               --name ${{ env.ACA_APP_NAME }} \
               --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
               --query "[?properties.active] | [0].properties.healthState" -o tsv)
-            echo "[$i/24] image=${ACTIVE_IMAGE} health=${HEALTH}"
-            if [[ "$ACTIVE_IMAGE" == "$EXPECTED_IMAGE" && "$HEALTH" == "Healthy" ]]; then
-              echo "Revision active and healthy" >> $GITHUB_STEP_SUMMARY
+            echo "[$i/24] image=${ACTIVE_IMAGE} health=${HEALTH} active_digest=${ACTIVE_DIGEST:-unknown}"
+            if [[ "$ACTIVE_IMAGE" == "$EXPECTED_IMAGE" && "$HEALTH" == "Healthy" && "$ACTIVE_DIGEST" == "$EXPECTED_DIGEST" ]]; then
+              {
+                echo "Revision active and healthy"
+                echo "active_image=${ACTIVE_IMAGE}"
+                echo "active_digest=${ACTIVE_DIGEST}"
+                echo "expected_digest=${EXPECTED_DIGEST}"
+              } >> $GITHUB_STEP_SUMMARY
               break
             fi
             if [[ $i -eq 24 ]]; then
               echo "Revision did not become healthy after 4 minutes" >&2
+              echo "expected_image=${EXPECTED_IMAGE}" >&2
+              echo "expected_digest=${EXPECTED_DIGEST}" >&2
+              echo "active_image=${ACTIVE_IMAGE:-unknown}" >&2
+              echo "resolved_digest=${ACTIVE_DIGEST:-unknown}" >&2
               az containerapp revision list \
                 --name ${{ env.ACA_APP_NAME }} \
                 --resource-group ${{ env.ACA_RESOURCE_GROUP }} \
